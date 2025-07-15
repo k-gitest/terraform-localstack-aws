@@ -1,0 +1,27 @@
+{
+  "name": "Terraform + LocalStack Dev",
+  "image": "mcr.microsoft.com/devcontainers/universal:latest",
+  "features": {
+    "ghcr.io/devcontainers/features/aws-cli:1": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/terraform:1": {
+      "version": "latest",
+      "tflint": "0.56.0"
+    },
+    "ghcr.io/localstack/devcontainer-feature/localstack-cli:0": {
+      "version": "4.1.0",
+      "awslocal": true,
+      "tflocal": true
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "hashicorp.terraform", // Terraform 用の VS Code 拡張機能
+        "ms-vscode.vscode-typescript-next" // 必要であれば他の拡張機能も追加
+      ]
+    }
+  },
+  "postCreateCommand": "./.devcontainer/setup.sh"
+}
