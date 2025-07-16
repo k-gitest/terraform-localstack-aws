@@ -15,14 +15,16 @@ TerraformとLocalStackを使用してawsをコードで管理し自動作成
 ├── .devcontainer/
 │   ├── devcontainer.json
 │   └── setup.sh
-├── main.tf                 # ルートモジュールのmain.tf (modules/s3 を呼び出す)
-├── variables.tf            # ルートモジュールの変数定義
-├── outputs.tf              # ルートモジュールの出力定義
-├── modules/
-│   └── s3/                 # S3モジュールのディレクトリ
-│       ├── main.tf         # S3モジュールのリソース定義 (s3バケットなど)
-│       ├── variables.tf    # S3モジュール固有の変数定義
-│       └── outputs.tf      # S3モジュール固有の出力定義
+├── terraform/
+│   ├── modules/
+│   │   └── s3/                 # S3モジュールのディレクトリ
+│   │       ├── main.tf         # S3モジュールのリソース定義 (s3バケットなど)
+│   │       ├── variables.tf    # S3モジュール固有の変数定義
+│   │       └── outputs.tf      # S3モジュール固有の出力定義
+│   ├── main.tf                 # ルートモジュールのmain.tf (modules/s3 を呼び出す)
+│   ├── variables.tf            # ルートモジュールの変数定義
+│   ├── outputs.tf              # ルートモジュールの出力定義
+│   └── provider.tf             # ルートモジュールのプロバイダー定義
 ├── README.md
 └── .gitignore
 

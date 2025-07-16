@@ -1,7 +1,12 @@
 # Terraform
-.terraform/
-*.tfstate
-*.tfstate.backup
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfplan
+terraform/*.backup
+
+# Crash logs
+crash.log
 
 # Codespaces / VS Code 関連
 .vscode/
