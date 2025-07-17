@@ -21,13 +21,27 @@ resource "aws_s3_bucket_ownership_controls" "this" {
   }
 }
 
-# 作成したバケットのオブジェクトアップロード設定 (これは通常モジュール外で管理)
-# resource "aws_s3_object" "example" {
-#   count  = var.upload_example_object ? 1 : 0
-#   bucket = aws_s3_bucket.this.id
-#   key    = "example.txt"
-#   source = "${path.module}/files/example.txt"
-# }
+# === 静的ファイルアップロード機能 ===
+resource "aws_s3_object" "static_files" {
+  for_each = var.upload_static_files ? fileset(var.static_files_source_path, "**/*") : []
+  
+  bucket = aws_s3_bucket.this.id
+  key    = each.value
+  source = "${var.static_files_source_path}/${each.value}"
+  
+  # MIMEタイプの自動判定
+  content_type = lookup(
+    var.mime_type_mapping,
+    regex("\\.[^.]+$", each.value),
+    var.default_mime_type
+  )
+  
+  # キャッシュ制御
+  cache_control = var.cache_control
+  
+  # ファイルハッシュでバージョン管理
+  etag = filemd5("${var.static_files_source_path}/${each.value}")
+}
 
 // === 静的サイトのホスティング設定 (enable_website_hosting が true の場合のみ作成) ===
 resource "aws_s3_bucket_website_configuration" "this" {
@@ -100,6 +114,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "this" {
       id     = rule.value.id
       status = rule.value.enabled ? "Enabled" : "Disabled"
 
+      # 必ず filter ブロックを追加し、空の filter を指定する
+      # もし特定のプレフィックスでフィルタリングしたい場合は、filter { prefix = "my-prefix/" } のように設定します。
+      filter {}
+
       dynamic "expiration" {
         for_each = lookup(rule.value, "expiration_days", null) != null ? [1] : []
         content {
@@ -110,3 +128,23 @@ resource "aws_s3_bucket_lifecycle_configuration" "this" {
   }
 }
 
+# S3イベント通知の設定
+# lambda_trigger_enabled が true かつ lambda_function_arn が指定されている場合にのみ作成
+/*
+resource "aws_s3_bucket_notification" "lambda_trigger" {
+  count  = var.lambda_trigger_enabled && var.lambda_function_arn != null ? 1 : 0
+  bucket = aws_s3_bucket.this.id
+
+  lambda_function {
+    lambda_function_arn = var.lambda_function_arn
+    events              = var.lambda_events
+    filter_prefix       = var.lambda_filter_prefix
+    filter_suffix       = var.lambda_filter_suffix
+  }
+
+  # aws_lambda_permission をルートに移動するので、depends_on は不要になるか、
+  # S3バケットとLambda関数、そして許可の関連性を考慮して調整します。
+  # この depends_on は、S3バケット通知がLambda関数より後に作成されることを保証するものです。
+  # depends_on = [aws_lambda_permission.allow_s3_to_invoke_lambda] 
+}
+*/

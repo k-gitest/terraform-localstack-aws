@@ -91,3 +91,81 @@ variable "lifecycle_rules" {
   }))
   default = []
 }
+
+# === 静的ファイルアップロード用変数 ===
+variable "upload_static_files" {
+  description = "Whether to upload static files to the bucket"
+  type        = bool
+  default     = false
+}
+
+variable "static_files_source_path" {
+  description = "Path to the directory containing static files"
+  type        = string
+  default     = ""
+}
+
+variable "mime_type_mapping" {
+  description = "Mapping of file extensions to MIME types"
+  type        = map(string)
+  default = {
+    ".html" = "text/html"
+    ".css"  = "text/css"
+    ".js"   = "application/javascript"
+    ".json" = "application/json"
+    ".png"  = "image/png"
+    ".jpg"  = "image/jpeg"
+    ".jpeg" = "image/jpeg"
+    ".gif"  = "image/gif"
+    ".svg"  = "image/svg+xml"
+    ".ico"  = "image/x-icon"
+    ".pdf"  = "application/pdf"
+    ".txt"  = "text/plain"
+    ".webp" = "image/webp"
+  }
+}
+
+variable "default_mime_type" {
+  description = "Default MIME type for unknown file extensions"
+  type        = string
+  default     = "application/octet-stream"
+}
+
+variable "cache_control" {
+  description = "Cache control header for static files"
+  type        = string
+  default     = "public, max-age=86400"
+}
+
+# Lambdaトリガー関連変数
+/*
+variable "lambda_trigger_enabled" {
+  description = "Set to true to enable Lambda triggers for this S3 bucket."
+  type        = bool
+  default     = false
+}
+
+variable "lambda_function_arn" {
+  description = "The ARN of the Lambda function to trigger."
+  type        = string
+  default     = null # トリガーが有効な場合のみ必須
+}
+
+variable "lambda_events" {
+  description = "A list of S3 events that will trigger the Lambda function (e.g., [\"s3:ObjectCreated:*\", \"s3:ObjectRemoved:*\"])."
+  type        = list(string)
+  default     = ["s3:ObjectCreated:*"] # デフォルトでオブジェクト作成イベントに設定
+}
+
+variable "lambda_filter_prefix" {
+  description = "Object key prefix to filter events."
+  type        = string
+  default     = null
+}
+
+variable "lambda_filter_suffix" {
+  description = "Object key suffix to filter events."
+  type        = string
+  default     = null
+}
+*/
