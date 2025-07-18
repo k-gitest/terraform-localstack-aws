@@ -175,6 +175,7 @@ module "user_content_s3_buckets" {
   # lambda_filter_suffix = ".pdf"
 }
 
+/*
 # Lambda関数でのファイル処理
 resource "aws_lambda_function" "image_processor" {
   filename         = "image_processor.zip"
@@ -284,4 +285,67 @@ resource "aws_iam_policy" "s3_access_policy" {
 resource "aws_iam_role_policy_attachment" "lambda_s3_access_attachment" {
   role       = aws_iam_role.lambda_role.name
   policy_arn = aws_iam_policy.s3_access_policy.arn
+}
+*/
+
+# Lambda関数
+module "image_processor_lambda" {
+  source = "./modules/lambda"
+  
+  function_name   = "user-content-processor"
+  lambda_zip_file = "image_processor.zip"
+  handler        = "index.handler"
+  runtime        = "python3.9"
+  timeout        = 300
+  memory_size    = 512
+  
+  environment_variables = {
+    PROFILE_BUCKET = module.user_content_s3_buckets["profile_pictures"].bucket_id
+    IMAGES_BUCKET  = module.user_content_s3_buckets["user_documents"].bucket_id
+    TEMP_BUCKET    = module.user_content_s3_buckets["temp_uploads"].bucket_id
+  }
+  
+  s3_bucket_arns = [
+    module.user_content_s3_buckets["profile_pictures"].bucket_arn,
+    module.user_content_s3_buckets["user_documents"].bucket_arn,
+    module.user_content_s3_buckets["temp_uploads"].bucket_arn
+  ]
+  
+  tags = {
+    Environment = "Production"
+    Project     = "UserContent"
+    Component   = "ImageProcessor"
+  }
+}
+
+# S3-Lambda統合
+module "temp_uploads_lambda_integration" {
+  count  = contains(keys(local.user_content_buckets), "temp_uploads") ? 1 : 0
+  source = "./modules/s3-lambda-integration"
+  
+  s3_bucket_id         = module.user_content_s3_buckets["temp_uploads"].bucket_id
+  s3_bucket_arn        = module.user_content_s3_buckets["temp_uploads"].bucket_arn
+  s3_bucket_name       = module.user_content_s3_buckets["temp_uploads"].bucket_id
+  lambda_function_arn  = module.image_processor_lambda.function_arn
+  lambda_function_name = module.image_processor_lambda.function_name
+  
+  lambda_events        = ["s3:ObjectCreated:*"]
+  lambda_filter_prefix = "incoming/"
+  statement_id         = "AllowS3InvokeLambda-temp-uploads"
+  
+  enable_notification = true
+}
+
+# 出力
+output "lambda_function_arn" {
+  description = "Lambda関数のARN"
+  value       = module.image_processor_lambda.function_arn
+}
+
+output "integration_status" {
+  description = "S3-Lambda統合の状態"
+  value = length(module.temp_uploads_lambda_integration) > 0 ? {
+    enabled = length(module.temp_uploads_lambda_integration[0].configured_events) > 0
+    events  = module.temp_uploads_lambda_integration[0].configured_events
+  } : null
 }
