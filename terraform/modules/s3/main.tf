@@ -127,24 +127,3 @@ resource "aws_s3_bucket_lifecycle_configuration" "this" {
     }
   }
 }
-
-# S3イベント通知の設定
-# lambda_trigger_enabled が true かつ lambda_function_arn が指定されている場合にのみ作成
-/*
-resource "aws_s3_bucket_notification" "lambda_trigger" {
-  count  = var.lambda_trigger_enabled && var.lambda_function_arn != null ? 1 : 0
-  bucket = aws_s3_bucket.this.id
-
-  lambda_function {
-    lambda_function_arn = var.lambda_function_arn
-    events              = var.lambda_events
-    filter_prefix       = var.lambda_filter_prefix
-    filter_suffix       = var.lambda_filter_suffix
-  }
-
-  # aws_lambda_permission をルートに移動するので、depends_on は不要になるか、
-  # S3バケットとLambda関数、そして許可の関連性を考慮して調整します。
-  # この depends_on は、S3バケット通知がLambda関数より後に作成されることを保証するものです。
-  # depends_on = [aws_lambda_permission.allow_s3_to_invoke_lambda] 
-}
-*/

@@ -17,10 +17,3 @@ output "bucket_region" {
   description = "The AWS region where the S3 bucket is located."
   value       = aws_s3_bucket.this.region
 }
-
-/*
-output "is_lambda_trigger_enabled" {
-  description = "Whether Lambda trigger is enabled for this S3 bucket."
-  value       = var.lambda_trigger_enabled # 入力された変数の値をそのまま出力
-}
-*/

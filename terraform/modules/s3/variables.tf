@@ -136,36 +136,3 @@ variable "cache_control" {
   type        = string
   default     = "public, max-age=86400"
 }
-
-# Lambdaトリガー関連変数
-/*
-variable "lambda_trigger_enabled" {
-  description = "Set to true to enable Lambda triggers for this S3 bucket."
-  type        = bool
-  default     = false
-}
-
-variable "lambda_function_arn" {
-  description = "The ARN of the Lambda function to trigger."
-  type        = string
-  default     = null # トリガーが有効な場合のみ必須
-}
-
-variable "lambda_events" {
-  description = "A list of S3 events that will trigger the Lambda function (e.g., [\"s3:ObjectCreated:*\", \"s3:ObjectRemoved:*\"])."
-  type        = list(string)
-  default     = ["s3:ObjectCreated:*"] # デフォルトでオブジェクト作成イベントに設定
-}
-
-variable "lambda_filter_prefix" {
-  description = "Object key prefix to filter events."
-  type        = string
-  default     = null
-}
-
-variable "lambda_filter_suffix" {
-  description = "Object key suffix to filter events."
-  type        = string
-  default     = null
-}
-*/

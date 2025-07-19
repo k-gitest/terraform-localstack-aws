@@ -86,28 +86,3 @@ variable "lambda_configurations" {
   }))
   default = []
 }
-
-# その他の通知設定（SNS、SQS）
-variable "topic_configurations" {
-  description = "SNSトピックへの通知設定"
-  type = list(object({
-    topic_arn     = string
-    events        = list(string)
-    filter_prefix = optional(string)
-    filter_suffix = optional(string)
-    id            = optional(string)
-  }))
-  default = []
-}
-
-variable "queue_configurations" {
-  description = "SQSキューへの通知設定"
-  type = list(object({
-    queue_arn     = string
-    events        = list(string)
-    filter_prefix = optional(string)
-    filter_suffix = optional(string)
-    id            = optional(string)
-  }))
-  default = []
-}
