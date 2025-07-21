@@ -13,3 +13,6 @@ apply:
 
 destroy:
 	cd $(TF_DIR) && tflocal destroy
+
+login:
+	cd $(TF_DIR) && tflocal login

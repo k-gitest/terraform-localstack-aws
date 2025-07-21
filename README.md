@@ -1,8 +1,10 @@
-# TerraformとLocalStackでawsのプロビジョニング
+# TerraformとLocalStackを用いたAWS環境（S3, Lambda, Amplify）のIaCプロビジョニング
 TerraformとLocalStackを使用してawsをコードで管理し自動作成
 
 ## 概要
-このプロジェクトは、IaCに基づき、awsのs3バケットのプロビジョニングを自動化します。
+このプロジェクトは、**Infrastructure as Code (IaC)** の原則に基づき、**Terraform** と **LocalStack** を活用してAWS環境のプロビジョニングを自動化します。特に、S3バケット、Lambda関数、Amplifyアプリケーションといった主要なAWSリソースの定義とデプロイをコードで管理することで、開発・検証プロセスの効率化と一貫性の確保を目指します。
+
+LocalStackを用いることで、ローカル環境でAWSサービスをエミュレートし、本番環境へのデプロイ前に安全かつ迅速なテストを行うことが可能です。
 
 ## 使用技術
 - Terraform
@@ -27,8 +29,12 @@ TerraformとLocalStackを使用してawsをコードで管理し自動作成
 │   │   │   ├── main.tf         # Lambda関数、IAMロール、ポリシー
 │   │   │   ├── variables.tf
 │   │   │   └── outputs.tf
-│   │   └── s3-lambda-integration/
-│   │       ├── main.tf         # S3通知設定、Lambda権限
+│   │   ├── s3-lambda-integration/ # S3とLambdaの連携モジュールのディレクトリ
+│   │   │   ├── main.tf         # S3通知設定、Lambda権限
+│   │   │   ├── variables.tf
+│   │   │   └── outputs.tf
+│   │   └── amplify/            # Amplifyモジュールのディレクトリ
+│   │       ├── main.tf         # Amplifyアプリケーション、ブランチなどの定義
 │   │       ├── variables.tf
 │   │       └── outputs.tf
 │   ├── main.tf                 # ルートモジュールのmain.tf (modules/s3 を呼び出す)
@@ -36,6 +42,7 @@ TerraformとLocalStackを使用してawsをコードで管理し自動作成
 │   ├── outputs.tf              # ルートモジュールの出力定義
 │   └── provider.tf             # ルートモジュールのプロバイダー定義
 ├── README.md
+├── Makefile
 └── .gitignore
 
 ```
@@ -58,7 +65,11 @@ TerraformとLocalStackを使用してawsをコードで管理し自動作成
 
 **S3-Lambda統合:**
 
-- 特定S3バケットからのイベント（例: temp_uploads バケットへのオブジェクト作成）をトリガーとしてLambda関数を呼び出すためのS3イベント通知とLambdaパーミッション
+- 特定S3バケットからのイベント（例: temp_uploadsバケットへのオブジェクト作成）をトリガーとしてLambda関数を呼び出すためのS3イベント通知とLambdaパーミッション
+
+**Amplifyアプリケーション:**
+
+- Webアプリケーションのホスティングとデプロイを管理するためのAmplifyアプリケーション。
 
 ## object_ownershipの分離
 aws providerのバージョンアップによりAWS Provider v4.9.0以降はobject_ownershipが単独リソースとなっています。
@@ -124,3 +135,38 @@ S3は静的なファイル配信に特化しているため、Node.jsなどの�
     この場合は、S3で静的アセットをホストしつつ、SSRのロジックは別のサーバーレスサービス（Lambda@Edgeなど）で実行することで対応可能です。
 * **Next.jsのApp Routerなど、サーバーサイドの実行環境を必要とする機能**:
     これらの機能を含むアプリケーションをS3で静的ホスティングすることはできません。これらの機能で機密情報を扱う場合は、VercelやNetlifyのような専用のサーバー環境、またはAWS Amplifyのような統合ホスティングサービスへの移行を検討する必要があります。
+
+## Terraform CloudとLocalStackの接続エラー
+
+**問題**: Terraform Cloudの実行環境から`localhost:4566`にアクセスできない。`connection refused`エラーがでます。
+
+**解決方法**:
+1. プロバイダーからcloudブロック削除/コメントアウト
+2. `terraform init`（出来ない場合は`.terraform`削除してから再実行）
+3. Terraform Cloud上の変数をターミナルに手動入力
+
+```bash
+# cloudブロック削除後
+rm -rf .terraform
+terraform init
+export AWS_ACCESS_KEY_ID="test"
+export AWS_SECRET_ACCESS_KEY="test"
+```
+
+## LocalStackでのAmplify制限
+
+LocalStackの無料版ではAmplifyが未サポートのため、`terraform apply`時にエラーが発生します。
+
+**エラー例**:
+```
+Error: creating Amplify App: StatusCode: 501, api error InternalFailure: 
+The API for service 'amplify' is either not included in your current license plan
+```
+
+**対策**: 環境に応じた条件分岐でリソース作成を制御
+```hcl
+resource "aws_amplify_app" "this" {
+  count = var.environment == "local" ? 0 : 1
+  # Amplify設定
+}
+```

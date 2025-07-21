@@ -225,3 +225,73 @@ output "integration_status" {
     events  = module.temp_uploads_lambda_integration[0].configured_events
   } : null
 }
+
+# Amplifyアプリケーションモジュールの呼び出し
+data "aws_region" "current" {}
+
+module "my_frontend_app" {
+  source = "./modules/amplify" # モジュールのパスを指定
+
+  app_name           = "my-awesome-amplify-app"
+  repository_url     = "https://github.com/your-org/your-amplify-repo.git"
+  github_oauth_token = var.github_access_token # ルートのvariables.tfから取得
+
+  # 必要に応じてカスタムのビルドスペックを渡す
+  build_spec = <<-EOT
+    version: 1
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - npm ci
+        build:
+          commands:
+            - npm run build
+      artifacts:
+        baseDirectory: build # Create React Appのデフォルト出力ディレクトリ
+        files:
+          - '**/*'
+    # キャッシュ設定などを追加することも可能
+    # cache:
+    #   paths:
+    #     - node_modules/**/*
+  EOT
+
+  environment_variables = {
+    #VITE_API_URL = "https://${module.my_backend_api.api_gateway_id}.execute-api.${data.aws_region.current.name}.amazonaws.com/prod"
+    # 他の環境変数
+  }
+
+  custom_rules = [
+    {
+      source = "/<*>"
+      target = "/index.html"
+      status = "200"
+    }
+  ]
+
+  tags = {
+    Project     = "MyAwesomeApp"
+    Environment = "Development"
+  }
+
+  branch_name = "main" # デプロイしたいブランチ名
+  branch_stage = "DEVELOPMENT"
+}
+
+# 他のモジュール呼び出し (S3, Lambdaなど)
+module "my_s3_bucket" {
+  source = "./modules/s3"
+  bucket_name = "my-unique-application-data-bucket"
+  # ... other variables
+}
+
+# 例えば、Lambdaの環境変数にAmplifyのドメインを渡すことも可能
+# module "my_lambda" {
+#   source = "./modules/lambda"
+#   function_name = "my-backend-function"
+#   environment_variables = {
+#     AMPLIFY_FRONTEND_URL = "https://${module.my_frontend_app.amplify_app_default_domain}"
+#   }
+#   # ... other variables
+# }
