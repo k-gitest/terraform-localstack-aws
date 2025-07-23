@@ -1,5 +1,3 @@
-# terraform/modules/amplify/outputs.tf
-
 output "amplify_app_id" {
   description = "The ID of the Amplify application."
   value       = aws_amplify_app.this.id

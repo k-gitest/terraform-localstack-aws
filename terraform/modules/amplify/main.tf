@@ -1,5 +1,3 @@
-# terraform/modules/amplify/main.tf
-
 resource "aws_amplify_app" "this" {
   name        = var.app_name
   repository  = var.repository_url
@@ -27,7 +25,7 @@ resource "aws_amplify_app" "this" {
 
 # デフォルトブランチまたは指定されたブランチ
 resource "aws_amplify_branch" "this" {
-  app_id              = aws_amplify_app.this.id
+  app_id      = aws_amplify_app.this.id
   branch_name         = var.branch_name
   stage               = var.branch_stage # DEVELOPMENT, PRODUCTION, STAGING, EXPERIMENTAL, AUTODETECT
   enable_auto_build   = var.enable_auto_build # デフォルトでtrueが望ましい
@@ -35,8 +33,6 @@ resource "aws_amplify_branch" "this" {
   # `display_name` と `framework` は aws_amplify_branch の有効な属性です
   display_name        = var.branch_display_name
   framework           = var.branch_framework
-
-  # `pull_request_preview_config` ブロックは直接サポートされていないため削除しました。
 
   # 注意: プルリクエストプレビューを有効にする、またはその設定を調整するには、
   # 通常、ブランチが作成された後に AWS Amplify Console UI を使用するか、

@@ -1,5 +1,3 @@
-# terraform/modules/amplify/variables.tf
-
 variable "app_name" {
   description = "Amplify application name."
   type        = string
@@ -32,6 +30,11 @@ variable "environment_variables" {
   description = "Environment variables for the Amplify app."
   type        = map(string)
   default     = {}
+}
+
+variable "environment" {
+  description = "The deployment environment received from the root module."
+  type        = string
 }
 
 variable "custom_rules" {

@@ -33,8 +33,20 @@ LocalStackを用いることで、ローカル環境でAWSサービスをエミ�
 │   │   │   ├── main.tf         # S3通知設定、Lambda権限
 │   │   │   ├── variables.tf
 │   │   │   └── outputs.tf
-│   │   └── amplify/            # Amplifyモジュールのディレクトリ
-│   │       ├── main.tf         # Amplifyアプリケーション、ブランチなどの定義
+│   │   ├── amplify/            # Amplifyモジュールのディレクトリ
+│   │   │   ├── main.tf         # Amplifyアプリケーション、ブランチなどの定義
+│   │   │   ├── variables.tf
+│   │   │   └── outputs.tf
+│   │   ├── ecr/                # コンテナイメージのリポジトリ
+│   │   │   ├── main.tf         # 
+│   │   │   ├── variables.tf
+│   │   │   └── outputs.tf
+│   │   ├── ecs-cluster/        # ECS クラスター定義 (EC2/Fargate 両対応)
+│   │   │   ├── main.tf         # 
+│   │   │   ├── variables.tf
+│   │   │   └── outputs.tf
+│   │   └── ecs-service-fargate/  # Fargateサービス専用
+│   │       ├── main.tf         # 
 │   │       ├── variables.tf
 │   │       └── outputs.tf
 │   ├── main.tf                 # ルートモジュールのmain.tf (modules/s3 を呼び出す)
@@ -153,20 +165,41 @@ export AWS_ACCESS_KEY_ID="test"
 export AWS_SECRET_ACCESS_KEY="test"
 ```
 
-## LocalStackでのAmplify制限
+## LocalStackでのサービス制限について
 
-LocalStackの無料版ではAmplifyが未サポートのため、`terraform apply`時にエラーが発生します。
+このプロジェクトではLocalStackを利用したローカル開発・テストをサポートしていますが、LocalStackの無料コミュニティ版では一部のAWSサービスが未サポートまたは機能が限定されているため、`terraform apply`時にエラーが発生する可能性があります。
 
 **エラー例**:
 ```
 Error: creating Amplify App: StatusCode: 501, api error InternalFailure: 
 The API for service 'amplify' is either not included in your current license plan
+
+Error: creating ECR Repository: operation error ECR: CreateRepository, https response error StatusCode: 501, RequestID: xxx, api error InternalFailure: The API for service 'ecr' is either not included in your current license plan or has not yet been emulated by LocalStack.
+
+Error: creating ECS Cluster: operation error ECS: CreateCluster, https response error StatusCode: 501, RequestID: xxx, api error InternalFailure: The API for service 'ecs' is either not included in your current license plan or has not yet been emulated by LocalStack. 
 ```
 
-**対策**: 環境に応じた条件分岐でリソース作成を制御
-```hcl
-resource "aws_amplify_app" "this" {
-  count = var.environment == "local" ? 0 : 1
-  # Amplify設定
-}
+### workspaceを使用してリソース作成を除外
+このプロジェクトでは、Terraformの**ワークスペース (`terraform workspace`)** 機能を利用して、開発環境 (LocalStack) と本番環境で同じ Terraformコードを使用できるようにしています。   
+terraform workspace new localでlocalワークスペースを作成し、LocalStackでサポートされていないリソースの作成自体を制御しています。
+
+例：
 ```
+count = terraform.workspace == "local" ? 0 : 1
+```
+
+**LocalStack 環境でのプロバイダー設定:**
+`terraform workspace select local` を実行した場合、`providers.tf` 内で定義されている `endpoints` ブロックが有効になり、AWS の各サービスは `http://localhost:4566` (LocalStack) を参照するようになります。
+
+例：
+```
+dynamic "endpoints" {
+    for_each = terraform.workspace == "local" ? ["local"] : []
+    content {
+      s3       = "http://localhost:4566"
+```
+
+### workspaceを使用しない場合
+workspaceなどで分岐しない場合、個別にenvironment変数などで条件分岐をする必要があります。   
+この場合、各リソースやモジュールの出力の参照時に配列インデックス ([0]) や try() 関数を用いた詳細な条件分岐が必要となり、Terraformコード全体が複雑化するため、あまり推奨されません。
+

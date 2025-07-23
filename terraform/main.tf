@@ -230,11 +230,14 @@ output "integration_status" {
 data "aws_region" "current" {}
 
 module "my_frontend_app" {
+  count = terraform.workspace == "local" ? 0 : 1
+
   source = "./modules/amplify" # モジュールのパスを指定
 
   app_name           = "my-awesome-amplify-app"
   repository_url     = "https://github.com/your-org/your-amplify-repo.git"
   github_oauth_token = var.github_access_token # ルートのvariables.tfから取得
+  environment        = var.environment
 
   # 必要に応じてカスタムのビルドスペックを渡す
   build_spec = <<-EOT
@@ -295,3 +298,119 @@ module "my_s3_bucket" {
 #   }
 #   # ... other variables
 # }
+
+# ECRモジュールの呼び出し
+module "ecr" {
+  count = terraform.workspace == "local" ? 0 : 1
+
+  source          = "./modules/ecr"
+  repository_name = "my-app-backend" # リポジトリ名を具体的に
+  environment     = var.environment
+  project_name    = var.project_name
+  tags            = var.tags
+}
+
+# ECSクラスターモジュールの呼び出し
+module "ecs_cluster" { # モジュール名をecs-clusterからecs_clusterに変更 (ハイフンは非推奨)
+  count = terraform.workspace == "local" ? 0 : 1
+
+  source      = "./modules/ecs-cluster"
+  cluster_name = "${var.project_name}-cluster-${var.environment}" # クラスター名を具体的に
+  environment = var.environment
+  project_name = var.project_name
+  tags = var.tags
+  # 必要に応じて、enable_fargate, enable_container_insights などを設定
+  enable_fargate = true
+  enable_container_insights = true
+}
+
+# ネットワーク基盤 (VPC, サブネット, セキュリティグループ) のモジュール呼び出しが不足しています。
+# FargateサービスはVPC内のサブネットとセキュリティグループを必要とします。
+# 例として、仮のVPC/サブネット/SGを設定しますが、実際には専用のVPCモジュールからの出力を利用すべきです。
+# 仮のVPC, サブネット, セキュリティグループの定義をここに追加 (本来は専用モジュールが良い)
+resource "aws_vpc" "main" {
+  cidr_block = "10.0.0.0/16"
+  tags = { Name = "${var.project_name}-vpc-${var.environment}" }
+}
+
+resource "aws_subnet" "public" {
+  count = 2 # 例として2つのパブリックサブネット
+  vpc_id     = aws_vpc.main.id
+  cidr_block = cidrsubnet(aws_vpc.main.cidr_block, 8, count.index) # 例
+  availability_zone = data.aws_availability_zones.available.names[count.index] # AZを取得
+  map_public_ip_on_launch = true
+  tags = { Name = "${var.project_name}-public-subnet-${count.index + 1}-${var.environment}" }
+}
+
+resource "aws_security_group" "ecs_fargate_sg" {
+  name        = "${var.project_name}-fargate-sg-${var.environment}"
+  description = "Security group for ECS Fargate tasks"
+  vpc_id      = aws_vpc.main.id
+
+  # 必要に応じてイングレス・エグレスルールを追加
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] # 例: HTTPアクセスを許可
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "${var.project_name}-fargate-sg-${var.environment}"
+    Environment = var.environment
+    Project     = var.project_name
+  }
+}
+
+# 利用可能なAZを取得するデータソース
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+
+# ECS Fargateサービスモジュールの呼び出し
+module "ecs_fargate_service" { # モジュール名をecs-fargateからecs_fargate_serviceに変更 (ハイフンは非推奨)
+  count = terraform.workspace == "local" ? 0 : 1
+
+  source = "./modules/ecs-service-fargate"
+
+  service_name = "${var.project_name}-backend-service-${var.environment}"
+  # module.ecs_clusterはcountを持つため、[0]でアクセスします。
+  # local環境でモジュールが存在しない可能性を考慮し、try() でラップします。
+  cluster_name    = try(module.ecs_cluster[0].cluster_name, "") # ecs-clusterモジュールの出力を参照
+
+  # module.ecrは countを持つため、[0]でアクセスします。
+  # local環境でモジュールが存在しない可能性を考慮し、try() でラップします
+  container_image = try(module.ecr[0].repository_url, "") # ECRモジュールの出力を参照
+
+  # 必須のネットワーク設定
+  subnets         = aws_subnet.public[*].id # 上記で定義したサブネットのIDリスト
+  security_groups = [aws_security_group.ecs_fargate_sg.id] # 上記で定義したセキュリティグループのID
+
+  # その他の必須ではないが、設定すべき変数
+  cpu    = 256
+  memory = 512
+  container_port = 8080 # アプリケーションのポートに合わせる
+  assign_public_ip = true # 必要であればパブリックIPを割り当てる
+
+  # 環境変数やシークレット
+  environment_variables = [
+    { name = "APP_ENV", value = var.environment },
+    { name = "DB_HOST", value = "my-database.example.com" }
+  ]
+  secrets = [
+    { name = "DB_PASSWORD", valueFrom = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/my-app/db-password" }
+  ]
+
+  # タグ
+  environment = var.environment
+  project_name = var.project_name
+  tags        = var.tags
+}
