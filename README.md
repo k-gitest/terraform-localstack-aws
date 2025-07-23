@@ -38,15 +38,15 @@ LocalStackを用いることで、ローカル環境でAWSサービスをエミ�
 │   │   │   ├── variables.tf
 │   │   │   └── outputs.tf
 │   │   ├── ecr/                # コンテナイメージのリポジトリ
-│   │   │   ├── main.tf         # 
+│   │   │   ├── main.tf         # ECRリポジトリのリソースを定義
 │   │   │   ├── variables.tf
 │   │   │   └── outputs.tf
 │   │   ├── ecs-cluster/        # ECS クラスター定義 (EC2/Fargate 両対応)
-│   │   │   ├── main.tf         # 
+│   │   │   ├── main.tf         # ECSクラスターのリソースを定義
 │   │   │   ├── variables.tf
 │   │   │   └── outputs.tf
 │   │   └── ecs-service-fargate/  # Fargateサービス専用
-│   │       ├── main.tf         # 
+│   │       ├── main.tf         # ECSタスク定義、ECSサービス、IAMロール、セキュリティグループなどのリソースを定義
 │   │       ├── variables.tf
 │   │       └── outputs.tf
 │   ├── main.tf                 # ルートモジュールのmain.tf (modules/s3 を呼び出す)
@@ -203,3 +203,12 @@ dynamic "endpoints" {
 workspaceなどで分岐しない場合、個別にenvironment変数などで条件分岐をする必要があります。   
 この場合、各リソースやモジュールの出力の参照時に配列インデックス ([0]) や try() 関数を用いた詳細な条件分岐が必要となり、Terraformコード全体が複雑化するため、あまり推奨されません。
 
+## LocalStack固有の設定
+
+### s3_use_path_style の設定
+LocalStackでS3を使用する場合、`s3_use_path_style = true` の設定が必要です。これは、S3のURLスタイルを以下のように変更します：
+
+- **Virtual hosted-style** (AWS標準): `https://bucket-name.s3.amazonaws.com/key`
+- **Path-style** (LocalStack用): `https://s3.amazonaws.com/bucket-name/key`
+
+この設定により、LocalStackのS3エミュレーターが正常に動作します。
