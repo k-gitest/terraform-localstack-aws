@@ -1,45 +1,45 @@
-# ECR Repository Information
+# ECRリポジトリ情報
 output "repository_name" {
-  description = "Name of the ECR repository"
+  description = "ECRリポジトリの名前"
   value       = aws_ecr_repository.this.name
 }
 
 output "repository_url" {
-  description = "URL of the ECR repository"
+  description = "ECRリポジトリのURL"
   value       = aws_ecr_repository.this.repository_url
 }
 
 output "repository_arn" {
-  description = "ARN of the ECR repository"
+  description = "ECRリポジトリのARN（Amazon Resource Name）"
   value       = aws_ecr_repository.this.arn
 }
 
 output "registry_id" {
-  description = "Registry ID where the repository was created"
+  description = "リポジトリが作成されたレジストリID"
   value       = aws_ecr_repository.this.registry_id
 }
 
-# Useful for Docker commands
+# Dockerコマンド用
 output "repository_uri_with_tag" {
-  description = "Repository URI with latest tag (useful for Docker commands)"
+  description = "latestタグ付きのリポジトリURI（Dockerコマンドで使用）"
   value       = "${aws_ecr_repository.this.repository_url}:latest"
 }
 
 output "docker_login_command" {
-  description = "AWS CLI command to authenticate Docker with ECR"
+  description = "DockerをECRで認証するためのAWS CLIコマンド"
   value       = "aws ecr get-login-password --region ${data.aws_region.current.name} | docker login --username AWS --password-stdin ${aws_ecr_repository.this.repository_url}"
 }
 
-# Policy Information
+# ポリシー情報
 output "lifecycle_policy_created" {
-  description = "Whether lifecycle policy was created"
+  description = "ライフサイクルポリシーが作成されたかどうか"
   value       = var.enable_lifecycle_policy
 }
 
 output "repository_policy_created" {
-  description = "Whether repository policy was created"
+  description = "リポジトリポリシーが作成されたかどうか"
   value       = var.enable_cross_account_access && length(var.allowed_account_ids) > 0
 }
 
-# Data source for current region
+# 現在のリージョン取得用データソース
 data "aws_region" "current" {}

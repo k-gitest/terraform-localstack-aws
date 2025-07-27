@@ -1,22 +1,22 @@
 variable "bucket_name" {
-  description = "The name of the S3 bucket to create."
+  description = "作成するS3バケットの名前"
   type        = string
 }
 
 variable "tags" {
-  description = "A map of tags to assign to the bucket."
+  description = "バケットに割り当てるタグのマップ"
   type        = map(string)
   default     = {}
 }
 
 variable "upload_example_object" {
-  description = "Whether to upload an example object to the bucket."
+  description = "バケットにサンプルオブジェクトをアップロードするかどうか"
   type        = bool
   default     = false
 }
 
 variable "block_public_access" {
-  description = "Whether to block all public access to the S3 bucket."
+  description = "S3バケットへのすべてのパブリックアクセスをブロックするかどうか"
   type        = bool
   default     = true
 }
@@ -34,56 +34,56 @@ variable "enable_encryption" {
 }
 
 variable "enable_website_hosting" {
-  description = "Set to true to enable static website hosting on the bucket."
+  description = "バケットで静的ウェブサイトホスティングを有効にするかどうか"
   type        = bool
   default     = false # 通常は無効
 }
 
 variable "index_document_suffix" {
-  description = "The name of the index document (e.g., index.html) for website hosting."
+  description = "ウェブサイトホスティング用のインデックスドキュメント名（例：index.html）"
   type        = string
   default     = "index.html" # デフォルト値
 }
 
 variable "error_document_key" {
-  description = "The name of the error document (e.g., error.html) for website hosting."
+  description = "ウェブサイトホスティング用のエラードキュメント名（例：error.html）"
   type        = string
   default     = "error.html" # SPAの場合は index.html にオーバーライドする
 }
 
 variable "enable_public_read_policy" {
-  description = "Set to true to attach a public read policy to the bucket (required for static websites unless using CloudFront OAI/OAC)."
+  description = "バケットにパブリック読み取りポリシーを適用するかどうか（CloudFront OAI/OACを使用しない静的ウェブサイトで必要）"
   type        = bool
   default     = false # 通常は無効
 }
 
 variable "block_public_acls" {
-  description = "Whether to block public ACLs for the S3 bucket."
+  description = "S3バケットのパブリックACLをブロックするかどうか"
   type        = bool
   default     = true # デフォルトはブロック (セキュリティベストプラクティス)
 }
 
 variable "block_public_policy" {
-  description = "Whether to block public bucket policies for the S3 bucket."
+  description = "S3バケットのパブリックバケットポリシーをブロックするかどうか"
   type        = bool
   default     = true # デフォルトはブロック (セキュリティベストプラクティス)
 }
 
 variable "ignore_public_acls" {
-  description = "Whether to ignore public ACLs on objects for the S3 bucket."
+  description = "S3バケット内のオブジェクトのパブリックACLを無視するかどうか"
   type        = bool
   default     = true # デフォルトは無視 (セキュリティベストプラクティス)
 }
 
 variable "restrict_public_buckets" {
-  description = "Whether to restrict public buckets for the S3 bucket."
+  description = "S3バケットのパブリックアクセスを制限するかどうか"
   type        = bool
   default     = true # デフォルトは制限 (セキュリティベストプラクティス)
 }
 
 // ライフサイクルルールも追加するなら
 variable "lifecycle_rules" {
-  description = "A list of lifecycle rules for the bucket. Only applied if not empty."
+  description = "バケットのライフサイクルルールのリスト。空でない場合のみ適用される"
   type = list(object({
     id            = string
     enabled       = bool
@@ -94,19 +94,19 @@ variable "lifecycle_rules" {
 
 # === 静的ファイルアップロード用変数 ===
 variable "upload_static_files" {
-  description = "Whether to upload static files to the bucket"
+  description = "バケットに静的ファイルをアップロードするかどうか"
   type        = bool
   default     = false
 }
 
 variable "static_files_source_path" {
-  description = "Path to the directory containing static files"
+  description = "静的ファイルが格納されているディレクトリのパス"
   type        = string
   default     = ""
 }
 
 variable "mime_type_mapping" {
-  description = "Mapping of file extensions to MIME types"
+  description = "ファイル拡張子とMIMEタイプのマッピング"
   type        = map(string)
   default = {
     ".html" = "text/html"
@@ -126,13 +126,13 @@ variable "mime_type_mapping" {
 }
 
 variable "default_mime_type" {
-  description = "Default MIME type for unknown file extensions"
+  description = "不明なファイル拡張子に対するデフォルトのMIMEタイプ"
   type        = string
   default     = "application/octet-stream"
 }
 
 variable "cache_control" {
-  description = "Cache control header for static files"
+  description = "静的ファイル用のキャッシュコントロールヘッダー"
   type        = string
   default     = "public, max-age=86400"
 }

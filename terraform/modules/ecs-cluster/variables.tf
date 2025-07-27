@@ -1,30 +1,30 @@
-# ECS Cluster Configuration
+# ECSクラスター設定
 variable "cluster_name" { #（必須）
-  description = "Name of the ECS cluster"
+  description = "ECSクラスターの名前"
   type        = string
 }
 
-# Capacity Providers Configuration
+# キャパシティプロバイダー設定
 variable "enable_fargate" {
-  description = "Enable Fargate capacity provider"
+  description = "Fargateキャパシティプロバイダーを有効にする"
   type        = bool
   default     = true
 }
 
 variable "enable_fargate_spot" {
-  description = "Enable Fargate Spot capacity provider"
+  description = "Fargate Spotキャパシティプロバイダーを有効にする"
   type        = bool
   default     = false
 }
 
 variable "enable_ec2" {
-  description = "Enable EC2 capacity provider (requires EC2 instances with ECS agent)"
+  description = "EC2キャパシティプロバイダーを有効にする（ECSエージェント付きのEC2インスタンスが必要）"
   type        = bool
   default     = false
 }
 
 variable "default_capacity_provider_strategy" {
-  description = "Default capacity provider strategy for the cluster"
+  description = "クラスターのデフォルトキャパシティプロバイダー戦略"
   type = list(object({
     capacity_provider = string
     weight           = number
@@ -39,56 +39,56 @@ variable "default_capacity_provider_strategy" {
   ]
 }
 
-# Container Insights Configuration
+# Container Insights設定
 variable "enable_container_insights" {
-  description = "Enable CloudWatch Container Insights for the cluster"
+  description = "クラスターのCloudWatch Container Insightsを有効にする"
   type        = bool
   default     = true
 }
 
-# Execute Command Configuration
+# Execute Command設定
 variable "enable_execute_command_logging" {
-  description = "Enable logging for ECS execute command"
+  description = "ECS execute commandのログ記録を有効にする"
   type        = bool
   default     = false
 }
 
 variable "execute_command_log_group_name" {
-  description = "CloudWatch log group name for execute command logging"
+  description = "execute commandログ記録用のCloudWatchロググループ名"
   type        = string
   default     = ""
 }
 
 variable "execute_command_s3_bucket_name" {
-  description = "S3 bucket name for execute command logging"
+  description = "execute commandログ記録用のS3バケット名"
   type        = string
   default     = ""
 }
 
 variable "execute_command_s3_key_prefix" {
-  description = "S3 key prefix for execute command logging"
+  description = "execute commandログ記録用のS3キープレフィックス"
   type        = string
   default     = "ecs-execute-command"
 }
 
-# Tagging
+# タグ設定
 variable "tags" {
-  description = "A map of tags to assign to the resource"
+  description = "リソースに割り当てるタグのマップ"
   type        = map(string)
   default = {
     Terraform = "true"
   }
 }
 
-# Common naming convention
+# 共通命名規則
 variable "environment" {
-  description = "Environment name (e.g., dev, staging, prod)"
+  description = "環境名（例：dev、staging、prod）"
   type        = string
   default     = "dev"
 }
 
 variable "project_name" {
-  description = "Name of the project"
+  description = "プロジェクト名"
   type        = string
   default     = "myapp"
 }

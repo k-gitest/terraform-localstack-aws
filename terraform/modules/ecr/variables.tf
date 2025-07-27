@@ -1,76 +1,76 @@
-# ECR Repository Configuration
+# ECRリポジトリ設定
 variable "repository_name" { # 必須
-  description = "Name of the ECR repository"
+  description = "ECRリポジトリの名前"
   type        = string
 }
 
 variable "image_tag_mutability" {
-  description = "The tag mutability setting for the repository. Must be one of: MUTABLE or IMMUTABLE"
+  description = "リポジトリのタグ変更可能性設定。MUTABLE（変更可能）またはIMMUTABLE（変更不可）のいずれかを指定"
   type        = string
   default     = "MUTABLE"
   
   validation {
     condition     = contains(["MUTABLE", "IMMUTABLE"], var.image_tag_mutability)
-    error_message = "Image tag mutability must be either MUTABLE or IMMUTABLE."
+    error_message = "イメージタグの変更可能性は、MUTABLEまたはIMMUTABLEのいずれかである必要があります。"
   }
 }
 
 variable "scan_on_push" {
-  description = "Indicates whether images are scanned after being pushed to the repository"
+  description = "リポジトリにプッシュされた後にイメージをスキャンするかどうか"
   type        = bool
   default     = true
 }
 
-# Lifecycle Policy Configuration
+# ライフサイクルポリシー設定
 variable "enable_lifecycle_policy" {
-  description = "Enable lifecycle policy for the ECR repository"
+  description = "ECRリポジトリのライフサイクルポリシーを有効にする"
   type        = bool
   default     = true
 }
 
 variable "untagged_image_expiry_days" {
-  description = "Number of days to retain untagged images"
+  description = "タグなしイメージを保持する日数"
   type        = number
   default     = 1
 }
 
 variable "tagged_image_count_limit" {
-  description = "Number of tagged images to retain"
+  description = "保持するタグ付きイメージの数"
   type        = number
   default     = 10
 }
 
-# Repository Policy Configuration
+# リポジトリポリシー設定
 variable "enable_cross_account_access" {
-  description = "Enable cross-account access to the ECR repository"
+  description = "ECRリポジトリへのクロスアカウントアクセスを有効にする"
   type        = bool
   default     = false
 }
 
 variable "allowed_account_ids" {
-  description = "List of AWS account IDs allowed to access this repository"
+  description = "このリポジトリへのアクセスを許可するAWSアカウントIDのリスト"
   type        = list(string)
   default     = []
 }
 
-# Tagging
+# タグ設定
 variable "tags" {
-  description = "A map of tags to assign to the resource"
+  description = "リソースに割り当てるタグのマップ"
   type        = map(string)
   default = {
     Terraform = "true"
   }
 }
 
-# Common naming convention
+# 共通命名規則
 variable "environment" {
-  description = "Environment name (e.g., dev, staging, prod)"
+  description = "環境名（例：dev、staging、prod）"
   type        = string
   default     = "dev"
 }
 
 variable "project_name" {
-  description = "Name of the project"
+  description = "プロジェクト名"
   type        = string
   default     = "myapp"
 }

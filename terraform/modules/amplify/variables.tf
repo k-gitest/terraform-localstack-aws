@@ -1,44 +1,44 @@
 variable "app_name" {
-  description = "Amplify application name."
+  description = "Amplifyアプリケーションの名前"
   type        = string
 }
 
 variable "repository_url" {
-  description = "URL of the Git repository for the Amplify app."
+  description = "AmplifyアプリのGitリポジトリのURL"
   type        = string
 }
 
 variable "github_oauth_token" {
-  description = "GitHub OAuth token for private repositories. Consider using Secrets Manager or environment variables for sensitive data."
+  description = "プライベートリポジトリ用のGitHub OAuthトークン。機密データはSecrets Managerや環境変数の使用を検討してください。"
   type        = string
   sensitive   = true
 }
 
 variable "platform" {
-  description = "Platform of the Amplify app. Can be WEB or WEB_COMPUTE (for SSR)."
+  description = "Amplifyアプリのプラットフォーム。WEB または WEB_COMPUTE（SSR用）を指定できます。"
   type        = string
   default     = "WEB"
 }
 
 variable "build_spec" {
-  description = "Custom build specification for the Amplify app. If null, Amplify uses default build settings."
+  description = "Amplifyアプリのカスタムビルド仕様。nullの場合、Amplifyはデフォルトのビルド設定を使用します。"
   type        = string
   default     = null # nullをデフォルトにして任意にする
 }
 
 variable "environment_variables" {
-  description = "Environment variables for the Amplify app."
+  description = "Amplifyアプリの環境変数"
   type        = map(string)
   default     = {}
 }
 
 variable "environment" {
-  description = "The deployment environment received from the root module."
+  description = "ルートモジュールから受け取るデプロイメント環境"
   type        = string
 }
 
 variable "custom_rules" {
-  description = "List of custom redirect/rewrite rules for the Amplify app."
+  description = "Amplifyアプリのカスタムリダイレクト/リライトルールのリスト"
   type = list(object({
     source = string
     target = string
@@ -54,55 +54,55 @@ variable "custom_rules" {
 }
 
 variable "tags" {
-  description = "A map of tags to assign to the Amplify app."
+  description = "Amplifyアプリに割り当てるタグのマップ"
   type        = map(string)
   default     = {}
 }
 
 variable "branch_name" {
-  description = "Name of the branch to connect to the Amplify app."
+  description = "Amplifyアプリに接続するブランチの名前"
   type        = string
   default     = "main" # デフォルトブランチ名
 }
 
 variable "branch_stage" {
-  description = "The stage for the branch, e.g., DEVELOPMENT, PRODUCTION."
+  description = "ブランチのステージ（例：DEVELOPMENT、PRODUCTION）"
   type        = string
   default     = "DEVELOPMENT"
 }
 
 variable "enable_auto_build" {
-  description = "Enables auto building for the branch."
+  description = "ブランチの自動ビルドを有効にする"
   type        = bool
   default     = true
 }
 
 variable "branch_display_name" {
-  description = "Display name for the branch."
+  description = "ブランチの表示名"
   type        = string
   default     = null
 }
 
 variable "branch_framework" {
-  description = "Framework for the branch (e.g., REACT, NEXTJS)."
+  description = "ブランチのフレームワーク（例：REACT、NEXTJS）"
   type        = string
   default     = null
 }
 
 variable "enable_auto_pr_with_fork_branches" {
-  description = "Enables auto building of branches from a fork repository."
+  description = "フォークリポジトリのブランチからの自動ビルドを有効にする"
   type        = bool
   default     = false # 通常はfalseが安全
 }
 
 variable "enable_pull_request_preview" {
-  description = "Enables pull request previews for the branch."
+  description = "ブランチのプルリクエストプレビューを有効にする"
   type        = bool
   default     = false
 }
 
 variable "pull_request_preview_repository_name" {
-  description = "Name of the repository to use for pull request previews (if different from main repository)."
+  description = "プルリクエストプレビューに使用するリポジトリ名（メインリポジトリと異なる場合）"
   type        = string
   default     = null
 }

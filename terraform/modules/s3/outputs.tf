@@ -1,19 +1,19 @@
 output "bucket_name" {
-  description = "The name of the created S3 bucket."
+  description = "作成されたS3バケットの名前"
   value       = aws_s3_bucket.this.bucket
 }
 
 output "bucket_arn" {
-  description = "The ARN of the created S3 bucket."
+  description = "作成されたS3バケットのARN（Amazon Resource Name）"
   value       = aws_s3_bucket.this.arn
 }
 
 output "bucket_id" {
-  description = "The ID (name) of the created S3 bucket."
+  description = "作成されたS3バケットのID（名前）"
   value       = aws_s3_bucket.this.id
 }
 
 output "bucket_region" {
-  description = "The AWS region where the S3 bucket is located."
+  description = "S3バケットが配置されているAWSリージョン"
   value       = aws_s3_bucket.this.region
 }

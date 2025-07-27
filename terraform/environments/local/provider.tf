@@ -5,15 +5,6 @@ terraform {
       version = "~> 5.0" # または "> 5.0"
     }
   }
-
-  /* Local開発時はこの部分をコメントアウト
-  cloud { 
-    organization = "sb-terraform" 
-    workspaces { 
-      name = "mock_terraform" 
-    } 
-  }
-  */
 }
 
 
@@ -37,11 +28,12 @@ provider "aws" {
       sns      = "http://localhost:4566"
       ecr      = "http://localhost:4566"
       ecs      = "http://localhost:4566"
+      ec2      = "http://localhost:4566"
     }
   }
 
 }
 
 # 現在のAWSアカウントIDとリージョンを取得するデータソース
- data "aws_caller_identity" "current" {}
-# data "aws_region" "current" {}
+ #data "aws_caller_identity" "current" {}
+ #data "aws_region" "current" {}

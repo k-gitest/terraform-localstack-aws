@@ -1,55 +1,55 @@
-# ECS Cluster Information
+# ECSクラスター情報
 output "cluster_name" {
-  description = "Name of the ECS cluster"
+  description = "ECSクラスターの名前"
   value       = aws_ecs_cluster.this.name
 }
 
 output "cluster_id" {
-  description = "ID of the ECS cluster"
+  description = "ECSクラスターのID"
   value       = aws_ecs_cluster.this.id
 }
 
 output "cluster_arn" {
-  description = "ARN of the ECS cluster"
+  description = "ECSクラスターのARN（Amazon Resource Name）"
   value       = aws_ecs_cluster.this.arn
 }
 
-# Capacity Provider Information
+# キャパシティプロバイダー情報
 output "capacity_providers" {
-  description = "List of capacity providers associated with the cluster"
+  description = "クラスターに関連付けられたキャパシティプロバイダーのリスト"
   value       = local.capacity_providers
 }
 
 output "default_capacity_provider_strategy" {
-  description = "Default capacity provider strategy for the cluster"
+  description = "クラスターのデフォルトキャパシティプロバイダー戦略"
   value       = var.default_capacity_provider_strategy
 }
 
-# Configuration Status
+# 設定状態
 output "container_insights_enabled" {
-  description = "Whether Container Insights is enabled for the cluster"
+  description = "クラスターでContainer Insightsが有効かどうか"
   value       = var.enable_container_insights
 }
 
 output "execute_command_logging_enabled" {
-  description = "Whether execute command logging is enabled"
+  description = "execute commandログ記録が有効かどうか"
   value       = var.enable_execute_command_logging
 }
 
-# CloudWatch Log Group Information
+# CloudWatchロググループ情報
 output "execute_command_log_group_name" {
-  description = "CloudWatch log group name for execute command (if created)"
+  description = "execute command用のCloudWatchロググループ名（作成された場合）"
   value       = var.enable_execute_command_logging && var.execute_command_log_group_name != "" ? aws_cloudwatch_log_group.execute_command[0].name : null
 }
 
 output "execute_command_log_group_arn" {
-  description = "CloudWatch log group ARN for execute command (if created)"
+  description = "execute command用のCloudWatchロググループARN（作成された場合）"
   value       = var.enable_execute_command_logging && var.execute_command_log_group_name != "" ? aws_cloudwatch_log_group.execute_command[0].arn : null
 }
 
-# Useful for ECS Services
+# ECSサービス用
 output "cluster_configuration" {
-  description = "Complete cluster configuration for ECS services"
+  description = "ECSサービス用の完全なクラスター設定"
   value = {
     cluster_name = aws_ecs_cluster.this.name
     cluster_arn  = aws_ecs_cluster.this.arn

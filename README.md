@@ -20,6 +20,19 @@ LocalStackを用いることで、ローカル環境でAWSサービスをエミ�
 │   ├── devcontainer.json
 │   └── setup.sh
 ├── terraform/
+│   ├── environments/ # 環境ごとのプロバイダー
+│   │   ├── local/      
+│   │   │   ├── provider.tf      
+│   │   │   ├── main.tf # モジュール呼び出し(terraform/main.tf)
+│   │   │   └── variables.tf  
+│   │   ├── dev/      
+│   │   │   ├── provider.tf      
+│   │   │   ├── main.tf
+│   │   │   └── variables.tf  
+│   │   └── prod/      
+│   │       ├── provider.tf      
+│   │       ├── main.tf
+│   │       └── variables.tf  
 │   ├── modules/
 │   │   ├── s3/                 # S3モジュールのディレクトリ
 │   │   │   ├── main.tf         # S3モジュールのリソース定義 (s3バケットなど)
@@ -38,21 +51,24 @@ LocalStackを用いることで、ローカル環境でAWSサービスをエミ�
 │   │   │   ├── variables.tf
 │   │   │   └── outputs.tf
 │   │   ├── ecr/                # コンテナイメージのリポジトリ
-│   │   │   ├── main.tf         # ECRリポジトリのリソースを定義
+│   │   │   ├── main.tf         # ECRリポジトリとライフサイクルポリシーなど
 │   │   │   ├── variables.tf
 │   │   │   └── outputs.tf
 │   │   ├── ecs-cluster/        # ECS クラスター定義 (EC2/Fargate 両対応)
-│   │   │   ├── main.tf         # ECSクラスターのリソースを定義
+│   │   │   ├── main.tf         # クラスター、CloudWatchログ設定など
 │   │   │   ├── variables.tf
 │   │   │   └── outputs.tf
-│   │   └── ecs-service-fargate/  # Fargateサービス専用
-│   │       ├── main.tf         # ECSタスク定義、ECSサービス、IAMロール、セキュリティグループなどのリソースを定義
+│   │   ├── ecs-service-fargate/  # Fargateサービス専用
+│   │   │   ├── main.tf         # Fargateタスク定義、サービス、ALBターゲット登録等
+│   │   │   ├── variables.tf
+│   │   │   └── outputs.tf
+│   │   └── network/            # VPC・ネットワーク関連一式（サブネット, SG等含む）
+│   │       ├── main.tf         # VPC, IGW, Subnet, Route Table, Security Groupなどの構成
 │   │       ├── variables.tf
 │   │       └── outputs.tf
-│   ├── main.tf                 # ルートモジュールのmain.tf (modules/s3 を呼び出す)
+│   ├── main.tf                 # ルートモジュールのmain.tf (modules/ を呼び出す)
 │   ├── variables.tf            # ルートモジュールの変数定義
-│   ├── outputs.tf              # ルートモジュールの出力定義
-│   └── provider.tf             # ルートモジュールのプロバイダー定義
+│   └── outputs.tf              # ルートモジュールの出力定義
 ├── README.md
 ├── Makefile
 └── .gitignore
@@ -189,7 +205,7 @@ count = terraform.workspace == "local" ? 0 : 1
 ```
 
 **LocalStack 環境でのプロバイダー設定:**
-`terraform workspace select local` を実行した場合、`providers.tf` 内で定義されている `endpoints` ブロックが有効になり、AWS の各サービスは `http://localhost:4566` (LocalStack) を参照するようになります。
+`terraform workspace select local` を実行した場合、`providers.tf` 内で定義されている `endpoints`ブロックが有効になり、AWS の各サービスは `http://localhost:4566` (LocalStack) を参照するようになります。
 
 例：
 ```
@@ -198,6 +214,10 @@ dynamic "endpoints" {
     content {
       s3       = "http://localhost:4566"
 ```
+
+**注意**:
+terraform workspaceはディレクトリ単位で設定します。   
+environments内の環境ごとで分けている場合、ルートではなくlocal内でterraform workspace new localをしなければ環境が切り替わりませんので注意しましょう。
 
 ### workspaceを使用しない場合
 workspaceなどで分岐しない場合、個別にenvironment変数などで条件分岐をする必要があります。   

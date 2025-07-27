@@ -1,3 +1,6 @@
+.terraform/
+.terraform/environment
+
 # Terraform
 terraform/.terraform/
 terraform/*.tfstate
@@ -12,3 +15,16 @@ crash.log
 .vscode/
 
 .._backup_repo/
+
+# 各環境ディレクトリ内の Terraform 生成ファイルを無視
+# environments/local/, environments/dev/, environments/prod/ 内の生成物に対応
+terraform/environments/*/ .terraform/
+terraform/environments/*/ .terraform.lock.hcl
+terraform/environments/*/ *.tfstate
+terraform/environments/*/ *.tfstate.backup
+
+terraform/environments/local/.terraform/
+terraform/environments/*/.terraform.lock.hcl
+terraform/environments/local/*.tfstate
+terraform/environments/local/*.tfstate.backup
+terraform/environments/local/terraform.tfstate.d/

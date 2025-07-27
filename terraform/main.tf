@@ -169,7 +169,7 @@ module "image_processor_lambda" {
   source = "./modules/lambda"
   
   function_name   = "user-content-processor"
-  lambda_zip_file = "image_processor.zip"
+  lambda_zip_file = "${path.module}/image_processor.zip"
   handler        = "index.handler"
   runtime        = "python3.9"
   timeout        = 300
@@ -227,8 +227,6 @@ output "integration_status" {
 }
 
 # Amplifyアプリケーションモジュールの呼び出し
-data "aws_region" "current" {}
-
 module "my_frontend_app" {
   count = terraform.workspace == "local" ? 0 : 1
 
@@ -286,7 +284,6 @@ module "my_frontend_app" {
 module "my_s3_bucket" {
   source = "./modules/s3"
   bucket_name = "my-unique-application-data-bucket"
-  # ... other variables
 }
 
 # 例えば、Lambdaの環境変数にAmplifyのドメインを渡すことも可能
@@ -324,56 +321,34 @@ module "ecs_cluster" { # モジュール名をecs-clusterからecs_clusterに変
   enable_container_insights = true
 }
 
-# ネットワーク基盤 (VPC, サブネット, セキュリティグループ) のモジュール呼び出しが不足しています。
-# FargateサービスはVPC内のサブネットとセキュリティグループを必要とします。
-# 例として、仮のVPC/サブネット/SGを設定しますが、実際には専用のVPCモジュールからの出力を利用すべきです。
-# 仮のVPC, サブネット, セキュリティグループの定義をここに追加 (本来は専用モジュールが良い)
-resource "aws_vpc" "main" {
-  cidr_block = "10.0.0.0/16"
-  tags = { Name = "${var.project_name}-vpc-${var.environment}" }
+# ネットワークモジュールの呼び出し
+module "network" {
+  # local環境ではネットワークリソースを作成しない場合はcount = 0を設定
+  count = terraform.workspace == "local" ? 0 : 1
+
+  source        = "./modules/network"
+  project_name  = var.project_name
+  environment   = var.environment
+  tags          = var.tags
+  vpc_cidr_block = "10.0.0.0/16" # 環境に応じて変数化することも可能
+  public_subnet_cidrs = ["10.0.1.0/24", "10.0.2.0/24"] # 環境に応じて変数化することも可能
+
+  ingress_rules = [
+    {
+      from_port   = 80
+      to_port     = 80
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    },
+    {
+      from_port   = 443
+      to_port     = 443
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"] # HTTPSアクセスを許可
+    }
+  ]
+  # その他の変数を必要に応じて設定
 }
-
-resource "aws_subnet" "public" {
-  count = 2 # 例として2つのパブリックサブネット
-  vpc_id     = aws_vpc.main.id
-  cidr_block = cidrsubnet(aws_vpc.main.cidr_block, 8, count.index) # 例
-  availability_zone = data.aws_availability_zones.available.names[count.index] # AZを取得
-  map_public_ip_on_launch = true
-  tags = { Name = "${var.project_name}-public-subnet-${count.index + 1}-${var.environment}" }
-}
-
-resource "aws_security_group" "ecs_fargate_sg" {
-  name        = "${var.project_name}-fargate-sg-${var.environment}"
-  description = "Security group for ECS Fargate tasks"
-  vpc_id      = aws_vpc.main.id
-
-  # 必要に応じてイングレス・エグレスルールを追加
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # 例: HTTPアクセスを許可
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name        = "${var.project_name}-fargate-sg-${var.environment}"
-    Environment = var.environment
-    Project     = var.project_name
-  }
-}
-
-# 利用可能なAZを取得するデータソース
-data "aws_availability_zones" "available" {
-  state = "available"
-}
-
 
 # ECS Fargateサービスモジュールの呼び出し
 module "ecs_fargate_service" { # モジュール名をecs-fargateからecs_fargate_serviceに変更 (ハイフンは非推奨)
@@ -391,8 +366,8 @@ module "ecs_fargate_service" { # モジュール名をecs-fargateからecs_farga
   container_image = try(module.ecr[0].repository_url, "") # ECRモジュールの出力を参照
 
   # 必須のネットワーク設定
-  subnets         = aws_subnet.public[*].id # 上記で定義したサブネットのIDリスト
-  security_groups = [aws_security_group.ecs_fargate_sg.id] # 上記で定義したセキュリティグループのID
+  subnets         = try(module.network[0].public_subnet_ids, []) # 上記で定義したサブネットのIDリスト
+  security_groups = try([module.network[0].ecs_fargate_security_group_id], []) # 上記で定義したセキュリティグループのID
 
   # その他の必須ではないが、設定すべき変数
   cpu    = 256
@@ -405,12 +380,21 @@ module "ecs_fargate_service" { # モジュール名をecs-fargateからecs_farga
     { name = "APP_ENV", value = var.environment },
     { name = "DB_HOST", value = "my-database.example.com" }
   ]
-  secrets = [
-    { name = "DB_PASSWORD", valueFrom = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/my-app/db-password" }
-  ]
+  secrets = var.environment == "local" ? [] : [
+  { 
+    name = "DB_PASSWORD", 
+    valueFrom = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current[0].account_id}:parameter/my-app/db-password" 
+  }
+]
 
   # タグ
   environment = var.environment
   project_name = var.project_name
   tags        = var.tags
+}
+
+# 直接取得
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {
+  count = var.environment == "local" ? 0 : 1
 }
