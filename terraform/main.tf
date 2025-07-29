@@ -228,7 +228,7 @@ output "integration_status" {
 
 # Amplifyアプリケーションモジュールの呼び出し
 module "my_frontend_app" {
-  count = terraform.workspace == "local" ? 0 : 1
+  count = var.environment == "local" ? 0 : 1
 
   source = "./modules/amplify" # モジュールのパスを指定
 
@@ -298,7 +298,7 @@ module "my_s3_bucket" {
 
 # ECRモジュールの呼び出し
 module "ecr" {
-  count = terraform.workspace == "local" ? 0 : 1
+  count = var.environment == "local" ? 0 : 1 
 
   source          = "./modules/ecr"
   repository_name = "my-app-backend" # リポジトリ名を具体的に
@@ -309,7 +309,7 @@ module "ecr" {
 
 # ECSクラスターモジュールの呼び出し
 module "ecs_cluster" { # モジュール名をecs-clusterからecs_clusterに変更 (ハイフンは非推奨)
-  count = terraform.workspace == "local" ? 0 : 1
+  count = var.environment == "local" ? 0 : 1
 
   source      = "./modules/ecs-cluster"
   cluster_name = "${var.project_name}-cluster-${var.environment}" # クラスター名を具体的に
@@ -323,8 +323,7 @@ module "ecs_cluster" { # モジュール名をecs-clusterからecs_clusterに変
 
 # ネットワークモジュールの呼び出し
 module "network" {
-  # local環境ではネットワークリソースを作成しない場合はcount = 0を設定
-  count = terraform.workspace == "local" ? 0 : 1
+  count = var.environment == "local" ? 0 : 1
 
   source        = "./modules/network"
   project_name  = var.project_name
@@ -347,12 +346,11 @@ module "network" {
       cidr_blocks = ["0.0.0.0/0"] # HTTPSアクセスを許可
     }
   ]
-  # その他の変数を必要に応じて設定
 }
 
 # ECS Fargateサービスモジュールの呼び出し
 module "ecs_fargate_service" { # モジュール名をecs-fargateからecs_fargate_serviceに変更 (ハイフンは非推奨)
-  count = terraform.workspace == "local" ? 0 : 1
+  count = var.environment == "local" ? 0 : 1
 
   source = "./modules/ecs-service-fargate"
 

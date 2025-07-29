@@ -16,20 +16,16 @@ provider "aws" {
   skip_requesting_account_id  = true
   s3_use_path_style = true
 
-  # localワークスペースの場合のみエンドポイントを設定
-  dynamic "endpoints" {
-    for_each = terraform.workspace == "local" ? ["local"] : []
-    content {
-      s3       = "http://localhost:4566"
-      iam      = "http://localhost:4566"
-      lambda   = "http://localhost:4566"
-      dynamodb = "http://localhost:4566"
-      sqs      = "http://localhost:4566"
-      sns      = "http://localhost:4566"
-      ecr      = "http://localhost:4566"
-      ecs      = "http://localhost:4566"
-      ec2      = "http://localhost:4566"
-    }
+  endpoints {
+    s3       = "http://localhost:4566"
+    iam      = "http://localhost:4566"
+    lambda   = "http://localhost:4566"
+    dynamodb = "http://localhost:4566"
+    sqs      = "http://localhost:4566"
+    sns      = "http://localhost:4566"
+    ecr      = "http://localhost:4566"
+    ecs      = "http://localhost:4566"
+    ec2      = "http://localhost:4566"
   }
 
 }
