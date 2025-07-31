@@ -30,3 +30,46 @@ variable "tags" {
     ManagedBy = "Terraform"
   }
 }
+
+# RDSの変数設定
+variable "postgres_password" {
+  description = "Password for PostgreSQL database"
+  type        = string
+  sensitive   = true
+}
+
+variable "mysql_password" {
+  description = "Password for MySQL database"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "reporting_db_password" {
+  description = "Password for reporting database"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+# Aurora PostgreSQL マスターパスワード
+variable "aurora_postgres_password" {
+  description = "Aurora PostgreSQL クラスターのマスターパスワード"
+  type        = string
+  sensitive   = true
+  validation {
+    condition     = length(var.aurora_postgres_password) >= 8
+    error_message = "Aurora PostgreSQL パスワードは8文字以上である必要があります。"
+  }
+}
+
+# Aurora MySQL マスターパスワード
+variable "aurora_mysql_password" {
+  description = "Aurora MySQL クラスターのマスターパスワード"
+  type        = string
+  sensitive   = true
+  validation {
+    condition     = length(var.aurora_mysql_password) >= 8
+    error_message = "Aurora MySQL パスワードは8文字以上である必要があります。"
+  }
+}

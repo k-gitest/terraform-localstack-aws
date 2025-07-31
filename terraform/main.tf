@@ -391,6 +391,211 @@ module "ecs_fargate_service" { # モジュール名をecs-fargateからecs_farga
   tags        = var.tags
 }
 
+# DBインスタンスの設定
+locals {
+  database_configs = {
+    # PostgreSQL データベース
+    main_postgres = {
+      engine                = "postgres"
+      engine_version        = "14.7"
+      instance_class        = "db.t3.small"
+      allocated_storage     = 20
+      db_name              = "maindb"
+      username             = "appuser"
+      password             = var.postgres_password
+      port                 = 5432
+      parameter_group_family = "postgres14"
+      skip_final_snapshot  = var.environment == "dev" || var.environment == "local" ? true : false
+      publicly_accessible  = false
+      custom_parameters    = {
+        "shared_buffers" = "256MB"
+        "max_connections" = "100"
+      }
+    }
+    
+    # MySQL データベース (オプション)
+    analytics_mysql = {
+      engine                = "mysql"
+      engine_version        = "8.0.35"
+      instance_class        = "db.t3.micro"
+      allocated_storage     = 20
+      db_name              = "analytics"
+      username             = "analytics_user"
+      password             = var.mysql_password
+      port                 = 3306
+      parameter_group_family = "mysql8.0"
+      skip_final_snapshot  = true
+      publicly_accessible  = false
+      custom_parameters    = {
+        "innodb_buffer_pool_size" = "{DBInstanceClassMemory*3/4}"
+      }
+    }
+    
+    # 別のPostgreSQL (レポート用など)
+    reporting_postgres = {
+      engine                = "postgres"
+      engine_version        = "15.4"
+      instance_class        = "db.t3.medium"
+      allocated_storage     = 50
+      db_name              = "reporting"
+      username             = "report_user"
+      password             = var.reporting_db_password
+      port                 = 5432
+      parameter_group_family = "postgres15"
+      skip_final_snapshot  = false
+      publicly_accessible  = false
+      custom_parameters    = {}
+    }
+  }
+}
+
+# RDSモジュールの呼び出し
+module "rds_databases" {
+  count = var.environment == "local" ? 0 : 1
+  
+  source = "./modules/rds"
+  
+  project_name          = var.project_name
+  environment           = var.environment
+  database_configs      = local.database_configs
+  
+  # networkモジュールからの出力を利用
+  vpc_id                = module.network[0].vpc_id
+  db_subnet_ids         = module.network[0].private_subnet_ids
+  application_security_group_id = module.network[0].ecs_fargate_security_group_id
+  
+  tags = var.tags
+}
+
+# Auroraクラスターの設定
+locals {
+  aurora_configs = {
+    # メインのAurora PostgreSQLクラスター
+    main_aurora_postgres = {
+      engine                = "aurora-postgresql"
+      engine_version        = "14.9"
+      cluster_identifier    = "${var.project_name}-aurora-postgres-${var.environment}"
+      database_name         = "maindb"
+      master_username       = "postgres"
+      master_password       = var.aurora_postgres_password
+      port                  = 5432
+      
+      # インスタンス設定
+      instances = {
+        writer = {
+          instance_class = "db.r6g.large"
+          publicly_accessible = false
+        }
+        reader = {
+          instance_class = "db.r6g.large"
+          publicly_accessible = false
+        }
+      }
+      
+      # バックアップ設定
+      backup_retention_period = 7
+      preferred_backup_window = "03:00-04:00"
+      preferred_maintenance_window = "sun:04:00-sun:05:00"
+      
+      # セキュリティ設定
+      storage_encrypted = true
+      deletion_protection = var.environment == "prod" ? true : false
+      skip_final_snapshot = var.environment == "dev" || var.environment == "local" ? true : false
+      final_snapshot_identifier = var.environment == "prod" ? "${var.project_name}-aurora-postgres-final-snapshot-${var.environment}" : null
+      
+      # パフォーマンス設定
+      performance_insights_enabled = true
+      monitoring_interval = 60
+      auto_minor_version_upgrade = false
+      
+      # スケーリング設定（サーバーレスv2の場合）
+      serverlessv2_scaling_configuration = {
+        max_capacity = 16
+        min_capacity = 0.5
+      }
+      
+      # パラメータグループ設定
+      cluster_parameter_group_family = "aurora-postgresql14"
+      db_parameter_group_family = "aurora-postgresql14"
+      
+      custom_cluster_parameters = {
+        "shared_preload_libraries" = "pg_stat_statements"
+        "log_statement" = "all"
+        "log_min_duration_statement" = "1000"
+      }
+      
+      custom_db_parameters = {
+        "shared_buffers" = "{DBInstanceClassMemory/4}"
+      }
+    }
+    
+    # 分析用Aurora MySQLクラスター（オプション）
+    analytics_aurora_mysql = {
+      engine                = "aurora-mysql"
+      engine_version        = "8.0.mysql_aurora.3.02.0"
+      cluster_identifier    = "${var.project_name}-aurora-mysql-${var.environment}"
+      database_name         = "analytics"
+      master_username       = "admin"
+      master_password       = var.aurora_mysql_password
+      port                  = 3306
+      
+      # インスタンス設定
+      instances = {
+        writer = {
+          instance_class = "db.r6g.xlarge"
+          publicly_accessible = false
+        }
+      }
+      
+      # バックアップ設定
+      backup_retention_period = 5
+      preferred_backup_window = "03:00-04:00"
+      preferred_maintenance_window = "sun:04:00-sun:05:00"
+      
+      # セキュリティ設定
+      storage_encrypted = true
+      deletion_protection = false
+      skip_final_snapshot = true
+      
+      # パフォーマンス設定
+      performance_insights_enabled = true
+      monitoring_interval = 60
+      auto_minor_version_upgrade = true
+      
+      # パラメータグループ設定
+      cluster_parameter_group_family = "aurora-mysql8.0"
+      db_parameter_group_family = "aurora-mysql8.0"
+      
+      custom_cluster_parameters = {
+        "innodb_buffer_pool_size" = "{DBInstanceClassMemory*3/4}"
+        "slow_query_log" = "1"
+        "long_query_time" = "2"
+      }
+      
+      custom_db_parameters = {}
+    }
+  }
+}
+
+# Auroraクラスターモジュールの呼び出し
+module "aurora_clusters" {
+  count = var.environment == "local" ? 0 : 1
+  
+  source = "./modules/aurora"
+  
+  project_name     = var.project_name
+  environment      = var.environment
+  aurora_configs   = local.aurora_configs
+  
+  # networkモジュールからの出力を利用（RDSと同じVPCを共有）
+  vpc_id           = module.network[0].vpc_id
+  db_subnet_ids    = module.network[0].private_subnet_ids
+  application_security_group_id = module.network[0].ecs_fargate_security_group_id
+  
+  tags = var.tags
+}
+
+
 # 直接取得
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {

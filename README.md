@@ -75,8 +75,16 @@ LocalStackを用いることで、ローカル環境でAWSサービスをエミ�
 │   │   │   ├── main.tf         # Fargateタスク定義、サービス、ALBターゲット登録等
 │   │   │   ├── variables.tf
 │   │   │   └── outputs.tf
-│   │   └── network/            # VPC・ネットワーク関連一式（サブネット, SG等含む）
-│   │       ├── main.tf         # VPC, IGW, Subnet, Route Table, Security Groupなどの構成
+│   │   ├── network/            # VPC・ネットワーク関連一式（サブネット, SG等含む）
+│   │   │   ├── main.tf         # VPC, IGW, Subnet, Route Table, Security Groupなどの構成
+│   │   │   ├── variables.tf
+│   │   │   └── outputs.tf
+│   │   ├── rds/                # RDSデータベースモジュール
+│   │   │   ├── main.tf         # RDSインスタンス、パラメータグループ、セキュリティグループ定義
+│   │   │   ├── variables.tf
+│   │   │   └── outputs.tf
+│   │   └── aurora/             # Auroraデータベースモジュール
+│   │       ├── main.tf         # Auroraクラスター、インスタンス、パラメータグループ、セキュリティグループ定義
 │   │       ├── variables.tf
 │   │       └── outputs.tf
 │   ├── main.tf                 # ルートモジュールのmain.tf (modules/ を呼び出す)
