@@ -226,3 +226,8 @@ output "connection_strings" {
     }
   }
 }
+
+output "aurora_sg_id" {
+  description = "Aurora 用セキュリティグループの ID"
+  value       = aws_security_group.aurora_sg.id
+}

@@ -36,8 +36,18 @@ variable "db_subnet_ids" {
   type        = list(string)
 }
 
+variable "db_subnet_group_name" {
+  description = "Database subnet group name"
+  type        = string
+}
+
 variable "application_security_group_id" {
-  description = "アプリケーションセキュリティグループID"
+  description = "アプリケーション用セキュリティグループID"
+  type        = string
+}
+
+variable "database_security_group_id" {
+  description = "データベース用セキュリティグループID"
   type        = string
 }
 

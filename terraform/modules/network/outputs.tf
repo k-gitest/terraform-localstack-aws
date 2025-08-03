@@ -8,14 +8,42 @@ output "public_subnet_ids" {
   value       = aws_subnet.public[*].id
 }
 
-/*
 output "private_subnet_ids" {
   description = "作成されたプライベートサブネットのIDリスト"
   value       = aws_subnet.private[*].id
 }
-*/
 
-output "ecs_fargate_security_group_id" {
-  description = "ECS Fargateサービス用のセキュリティグループID"
-  value       = aws_security_group.ecs_fargate_sg.id
+output "application_security_group_id" {
+  description = "アプリケーションサービス用のセキュリティグループID"
+  value       = aws_security_group.application_sg.id
+}
+
+output "database_security_group_id" {
+  description = "データベースサービス用のセキュリティグループID"
+  value       = aws_security_group.database_sg.id
+}
+
+output "db_subnet_group_name" {
+  description = "データベースサブネットグループの名前"
+  value       = aws_db_subnet_group.database_subnet_group.name
+}
+
+output "db_subnet_group_id" {
+  description = "データベースサブネットグループのID"
+  value       = aws_db_subnet_group.database_subnet_group.id
+}
+
+output "alb_security_group_id" {
+  description = "The ID of the security group attached to the ALB."
+  value       = aws_security_group.alb_sg.id
+}
+
+output "main_alb_arn" {
+  description = "The ARN of the main Application Load Balancer."
+  value       = aws_lb.main_alb.arn
+}
+
+output "main_alb_dns_name" {
+  description = "The DNS name of the main Application Load Balancer."
+  value       = aws_lb.main_alb.dns_name
 }

@@ -1,15 +1,5 @@
-# Aurora専用のDBサブネットグループ
-resource "aws_db_subnet_group" "aurora_subnet_group" {
-  name       = "${var.project_name}-aurora-subnet-group-${var.environment}"
-  subnet_ids = var.db_subnet_ids
-
-  tags = merge(var.tags, {
-    Name = "${var.project_name}-aurora-subnet-group-${var.environment}"
-    Type = "Aurora"
-  })
-}
-
 # Aurora用セキュリティグループ
+/*
 resource "aws_security_group" "aurora_security_group" {
   name_prefix = "${var.project_name}-aurora-sg-${var.environment}"
   vpc_id      = var.vpc_id
@@ -20,30 +10,37 @@ resource "aws_security_group" "aurora_security_group" {
     Type = "Aurora"
   })
 }
+*/
 
 # ECSからAuroraへのアクセスを許可
+/*
 resource "aws_security_group_rule" "aurora_ingress_from_ecs" {
-  for_each = var.aurora_configs
+  for_each = {
+    for cluster_name, config in var.aurora_configs : cluster_name => config.port
+  }
 
   type                     = "ingress"
-  from_port                = each.value.port
-  to_port                  = each.value.port
+  from_port                = each.value
+  to_port                  = each.value
   protocol                 = "tcp"
-  security_group_id        = aws_security_group.aurora_security_group.id
+  security_group_id        = var.database_security_group_id
   source_security_group_id = var.application_security_group_id
-  description              = "Allow ${each.key} access from ECS"
+  description              = "Allow access to port ${each.value} from ECS for ${each.key} cluster"
 }
+*/
 
 # Auroraからの外部通信を許可（アップデートなどのため）
+/*
 resource "aws_security_group_rule" "aurora_egress" {
   type              = "egress"
   from_port         = 0
-  to_port           = 65535
-  protocol          = "tcp"
+  to_port           = 65535 # or specific ports if needed
+  protocol          = "tcp" # or "-1" for all protocols
   cidr_blocks       = ["0.0.0.0/0"]
-  security_group_id = aws_security_group.aurora_security_group.id
+  security_group_id = var.database_security_group_id
   description       = "Allow all outbound traffic for Aurora"
 }
+*/
 
 # Auroraクラスター用パラメータグループ
 resource "aws_rds_cluster_parameter_group" "aurora_cluster_parameter_group" {
@@ -124,8 +121,8 @@ resource "aws_rds_cluster" "aurora_cluster" {
   port                  = each.value.port
 
   # ネットワーク設定
-  db_subnet_group_name   = aws_db_subnet_group.aurora_subnet_group.name
-  vpc_security_group_ids = [aws_security_group.aurora_security_group.id]
+  db_subnet_group_name   = var.db_subnet_group_name
+  vpc_security_group_ids = [var.database_security_group_id]
 
   # バックアップ設定
   backup_retention_period   = each.value.backup_retention_period

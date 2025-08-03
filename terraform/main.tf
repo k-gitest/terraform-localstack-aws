@@ -331,21 +331,78 @@ module "network" {
   tags          = var.tags
   vpc_cidr_block = "10.0.0.0/16" # 環境に応じて変数化することも可能
   public_subnet_cidrs = ["10.0.1.0/24", "10.0.2.0/24"] # 環境に応じて変数化することも可能
+}
 
-  ingress_rules = [
-    {
-      from_port   = 80
-      to_port     = 80
-      protocol    = "tcp"
-      cidr_blocks = ["0.0.0.0/0"]
-    },
-    {
-      from_port   = 443
-      to_port     = 443
-      protocol    = "tcp"
-      cidr_blocks = ["0.0.0.0/0"] # HTTPSアクセスを許可
+# ALBモジュール呼び出し
+module "alb" {
+  count  = var.environment == "local" ? 0 : 1
+  source = "./modules/alb"
+  
+  project_name = var.project_name
+  environment  = var.environment
+
+  alb_name        = "${var.project_name}-alb-${var.environment}"
+  internal        = false
+  subnets         = try(module.network[0].public_subnet_ids, [])
+  security_groups = try([module.network[0].alb_security_group_id], [])
+  vpc_id          = try(module.network[0].vpc_id, "")
+  
+  target_groups = {
+    backend = {
+      name     = "${var.project_name}-backend-tg-${var.environment}"
+      port     = 8080
+      protocol = "HTTP"
+      health_check = {
+        enabled             = true
+        healthy_threshold   = 2
+        interval           = 30
+        matcher            = "200"
+        path               = "/health"
+        protocol           = "HTTP"
+        port               = "traffic-port"
+        timeout            = 5
+        unhealthy_threshold = 2
+      }
     }
-  ]
+    frontend = {
+      name     = "${var.project_name}-frontend-tg-${var.environment}"
+      port     = 3000
+      protocol = "HTTP"
+      health_check = {
+        enabled             = true
+        healthy_threshold   = 2
+        interval           = 30
+        matcher            = "200"
+        path               = "/"
+        protocol           = "HTTP"
+        port               = "traffic-port"
+        timeout            = 5
+        unhealthy_threshold = 2
+      }
+    }
+  }
+  
+  default_target_group = "frontend"
+  
+  listener_rules = {
+    api = {
+      priority      = 100
+      target_group  = "backend"
+      path_patterns = ["/api/*"]
+    }
+  }
+  
+  # HTTPS設定
+  enable_https        = var.environment == "prod"
+  # ssl_certificate_arn = var.environment == "prod" ? var.ssl_certificate_arn : ""
+  
+  # 削除保護設定
+  enable_deletion_protection = var.environment == "prod"
+  
+  tags = {
+    Environment = var.environment
+    Project     = var.project_name
+  }
 }
 
 # ECS Fargateサービスモジュールの呼び出し
@@ -365,7 +422,18 @@ module "ecs_fargate_service" { # モジュール名をecs-fargateからecs_farga
 
   # 必須のネットワーク設定
   subnets         = try(module.network[0].public_subnet_ids, []) # 上記で定義したサブネットのIDリスト
-  security_groups = try([module.network[0].ecs_fargate_security_group_id], []) # 上記で定義したセキュリティグループのID
+  security_groups = try([module.network[0].application_security_group_id], []) # 上記で定義したセキュリティグループのID
+
+  # ★★★ 新しく追加する変数（networkモジュールからの出力を利用） ★★★
+  alb_security_group_id    = module.network[0].alb_security_group_id # ここでnetworkモジュールから取得
+  database_security_group_id = module.network[0].database_security_group_id
+  database_port            = 5432
+  enable_public_internet_egress = true
+  vpc_id                = try(module.network[0].vpc_id, "")
+  enable_load_balancer = true # ALBを有効にする場合はtrueに設定
+
+  # ALBターゲットグループの関連付け
+  target_group_arn = try(module.alb[0].target_group_arns["backend"], "")
 
   # その他の必須ではないが、設定すべき変数
   cpu    = 256
@@ -375,20 +443,62 @@ module "ecs_fargate_service" { # モジュール名をecs-fargateからecs_farga
 
   # 環境変数やシークレット
   environment_variables = [
-    { name = "APP_ENV", value = var.environment },
-    { name = "DB_HOST", value = "my-database.example.com" }
+      { name = "APP_ENV", value = var.environment },
+      { name = "DB_HOST", value = "my-database.example.com" }
+    ]
+    secrets = var.environment == "local" ? [] : [
+    { 
+      name = "DB_PASSWORD", 
+      valueFrom = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current[0].account_id}:parameter/my-app/db-password" 
+    }
   ]
-  secrets = var.environment == "local" ? [] : [
-  { 
-    name = "DB_PASSWORD", 
-    valueFrom = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current[0].account_id}:parameter/my-app/db-password" 
-  }
-]
 
   # タグ
   environment = var.environment
   project_name = var.project_name
   tags        = var.tags
+}
+
+# フロントエンド用ECSサービス
+module "ecs_fargate_frontend" {
+  count = var.environment == "local" ? 0 : 1
+
+  source = "./modules/ecs-service-fargate"
+
+  service_name = "${var.project_name}-frontend-service-${var.environment}"
+  cluster_name = try(module.ecs_cluster[0].cluster_name, "")
+
+  container_image = try(module.ecr_frontend[0].repository_url, "")
+
+  # ネットワーク設定
+  subnets         = try(module.network[0].private_subnet_ids, [])
+  security_groups = try([module.network[0].application_security_group_id], [])
+
+  alb_security_group_id         = try(module.network[0].alb_security_group_id, "")
+  database_security_group_id = module.network[0].database_security_group_id
+  database_port            = 5432
+  enable_public_internet_egress = true
+  vpc_id                        = try(module.network[0].vpc_id, "")
+  enable_load_balancer          = true
+
+  # ALBターゲットグループの関連付け
+  target_group_arn = try(module.alb[0].target_group_arns["frontend"], "")
+
+  cpu            = 256
+  memory         = 512
+  container_port = 3000
+  assign_public_ip = false
+
+  # 環境変数
+  environment_variables = [
+    { name = "NODE_ENV", value = var.environment },
+    { name = "API_URL", value = "https://${try(module.alb[0].dns_name, "")}" }
+  ]
+
+  # タグ
+  environment  = var.environment
+  project_name = var.project_name
+  tags         = var.tags
 }
 
 # DBインスタンスの設定
@@ -462,8 +572,10 @@ module "rds_databases" {
   # networkモジュールからの出力を利用
   vpc_id                = module.network[0].vpc_id
   db_subnet_ids         = module.network[0].private_subnet_ids
-  application_security_group_id = module.network[0].ecs_fargate_security_group_id
-  
+  db_subnet_group_name  = module.network[0].db_subnet_group_name
+  application_security_group_id = module.network[0].application_security_group_id
+  database_security_group_id    = module.network[0].database_security_group_id
+    
   tags = var.tags
 }
 
@@ -590,8 +702,10 @@ module "aurora_clusters" {
   # networkモジュールからの出力を利用（RDSと同じVPCを共有）
   vpc_id           = module.network[0].vpc_id
   db_subnet_ids    = module.network[0].private_subnet_ids
-  application_security_group_id = module.network[0].ecs_fargate_security_group_id
-  
+  db_subnet_group_name = module.network[0].db_subnet_group_name
+  application_security_group_id = module.network[0].application_security_group_id
+  database_security_group_id    = module.network[0].database_security_group_id
+    
   tags = var.tags
 }
 

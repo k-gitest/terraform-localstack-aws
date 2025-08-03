@@ -111,8 +111,49 @@ variable "subnets" {
 }
 
 variable "security_groups" {
-  description = "セキュリティグループIDのリスト"
+  description = "ECS Fargateタスクに適用するセキュリティグループのリスト"
   type        = list(string)
+}
+
+variable "alb_security_group_id" {
+  description = "The ID of the ALB's security group to allow inbound traffic from."
+  type        = string
+  default     = null # ALBがない場合はnull
+}
+
+variable "database_security_group_id" {
+  description = "The ID of the database security group to allow outbound traffic to."
+  type        = string
+  nullable    = false # 必須とする
+}
+
+variable "database_port" {
+  description = "The port of the database to allow outbound traffic to (e.g., 5432 for PostgreSQL, 3306 for MySQL)."
+  type        = number
+  nullable    = false # 必須とする
+}
+
+variable "enable_public_internet_egress" {
+  description = "Whether to allow all outbound traffic to the public internet (0.0.0.0/0). Set to false if using VPC Endpoints for all external services."
+  type        = bool
+  default     = true # デフォルトは許可する
+}
+
+variable "vpc_id" {
+  description = "The ID of the VPC."
+  type        = string
+}
+
+variable "health_check_path" {
+  description = "Path for ALB health checks."
+  type        = string
+  default     = "/"
+}
+
+variable "enable_load_balancer" {
+  description = "Whether to enable load balancer integration for the ECS service."
+  type        = bool
+  default     = false # デフォルトは無効にし、明示的に有効にするのが良い
 }
 
 variable "assign_public_ip" {
@@ -268,3 +309,4 @@ variable "project_name" {
   type        = string
   default     = "myapp"
 }
+

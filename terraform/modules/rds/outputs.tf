@@ -39,3 +39,8 @@ output "db_subnet_group_name" {
   description = "Database subnet group name"
   value = aws_db_subnet_group.this.name
 }
+
+output "db_security_group_id" {
+  description = "Database security group ID"
+  value       = aws_security_group.rds_sg.id
+}

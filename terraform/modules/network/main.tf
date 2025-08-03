@@ -24,8 +24,7 @@ resource "aws_subnet" "public" {
   )
 }
 
-# プライベートサブネット (必要であれば追加)
-/*
+# プライベートサブネット
 resource "aws_subnet" "private" {
   count = length(var.private_subnet_cidrs)
   vpc_id = aws_vpc.main.id
@@ -37,7 +36,19 @@ resource "aws_subnet" "private" {
     { Name = "${var.project_name}-private-subnet-${count.index + 1}-${var.environment}" }
   )
 }
-*/
+
+# データベース用サブネットグループ（RDSとAurora共通）
+resource "aws_db_subnet_group" "database_subnet_group" {
+  name        = "${var.project_name}-db-subnet-group-${var.environment}"
+  subnet_ids  = aws_subnet.private[*].id
+  description = "Database subnet group for RDS and Aurora instances"
+
+  tags = merge(var.tags, {
+    Name        = "${var.project_name}-db-subnet-group-${var.environment}"
+    Environment = var.environment
+    Type        = "Database"
+  })
+}
 
 # インターネットゲートウェイ
 resource "aws_internet_gateway" "gw" {
@@ -71,40 +82,93 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-
-# ECS Fargate用セキュリティグループ
-resource "aws_security_group" "ecs_fargate_sg" {
-  name        = "${var.project_name}-fargate-sg-${var.environment}"
-  description = "Security group for ECS Fargate tasks"
+/*
+# アプリケーション用セキュリティグループ（ECS Fargate等で使用）
+resource "aws_security_group" "application_sg" {
+  name        = "${var.project_name}-app-sg-${var.environment}"
+  description = "Security group for application services"
   vpc_id      = aws_vpc.main.id
 
-  dynamic "ingress" {
-    for_each = var.ingress_rules
-    content {
-      from_port   = ingress.value.from_port
-      to_port     = ingress.value.to_port
-      protocol    = ingress.value.protocol
-      cidr_blocks = ingress.value.cidr_blocks
-      security_groups = ingress.value.security_groups
-    }
-  }
-
-  dynamic "egress" {
-    for_each = var.egress_rules
-    content {
-      from_port   = egress.value.from_port
-      to_port     = egress.value.to_port
-      protocol    = egress.value.protocol
-      cidr_blocks = egress.value.cidr_blocks
-      security_groups = egress.value.security_groups
-    }
-  }
-
-  tags = merge(
-    var.tags,
-    { Name = "${var.project_name}-fargate-sg-${var.environment}" }
-  )
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-application-sg-${var.environment}"
+    Type = "Application"
+  })
 }
+
+# データベース用セキュリティグループ
+resource "aws_security_group" "database_sg" {
+  name        = "${var.project_name}-db-sg-${var.environment}"
+  description = "Security group for database services"
+  vpc_id      = aws_vpc.main.id
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-database-sg-${var.environment}"
+    Type = "Database"
+  })
+}
+*/
+
+# ALB用セキュリティグループ
+/*
+resource "aws_security_group" "alb_sg" {
+  name        = "${var.project_name}-alb-sg-${var.environment}"
+  description = "Security group for Application Load Balancer"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] # HTTPアクセスを許可 (インターネットから)
+    description = "Allow HTTP from internet"
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] # HTTPSアクセスを許可 (インターネットから)
+    description = "Allow HTTPS from internet"
+  }
+
+  # ALBからのアウトバウンドは通常全て許可
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound traffic"
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-alb-sg-${var.environment}"
+    Type = "LoadBalancer"
+  })
+}
+*/
+
+# ALB (Application Load Balancer)
+# ※ Fargateサービス用のターゲットグループとリスナーは通常、ECSサービスを定義するモジュールで作成します。
+#    ここではALB本体とそれに紐づくSGのみを定義する例です。
+/*
+resource "aws_lb" "main_alb" {
+  name               = "${var.project_name}-main-alb-${var.environment}"
+  internal           = false # 外部向けロードバランサー
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb_sg.id] # 作成したALB用SGをアタッチ
+  subnets            = aws_subnet.public.*.id # パブリックサブネットに配置
+
+  # その他のALB設定（必要に応じて）
+  enable_deletion_protection = false
+  idle_timeout               = 60
+
+  tags = merge(var.tags, {
+    Name        = "${var.project_name}-main-alb-${var.environment}"
+    Environment = var.environment
+    Project     = var.project_name
+  })
+}
+*/
 
 data "aws_availability_zones" "available" {
   state = "available"

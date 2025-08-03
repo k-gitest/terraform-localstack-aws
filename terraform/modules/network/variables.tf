@@ -69,3 +69,47 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "dev_ssh_cidr" {
+  description = "開発環境でのSSHアクセスを許可するCIDRブロック"
+  type        = string
+  default     = "10.0.0.0/8" # デフォルトは内部ネットワークのみ
+}
+
+variable "enable_dev_ssh" {
+  description = "開発環境でのSSHアクセスを有効にするかどうか"
+  type        = bool
+  default     = false
+}
+
+variable "database_engines" {
+  description = "使用するデータベースエンジンのリスト"
+  type        = list(string)
+  default     = ["postgres", "mysql"]
+  validation {
+    condition = alltrue([
+      for engine in var.database_engines : contains(["postgres", "mysql", "aurora-postgresql", "aurora-mysql"], engine)
+    ])
+    error_message = "サポートされているエンジンは postgres, mysql, aurora-postgresql, aurora-mysql です。"
+  }
+}
+
+# アプリケーションポートの設定
+variable "application_port" {
+  description = "アプリケーションがリッスンするポート"
+  type        = number
+  default     = 8080
+}
+
+# データベースポートの設定
+variable "database_ports" {
+  description = "データベースエンジンごとのポート設定"
+  type = object({
+    postgres = number
+    mysql    = number
+  })
+  default = {
+    postgres = 5432
+    mysql    = 3306
+  }
+}

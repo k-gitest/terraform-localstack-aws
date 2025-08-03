@@ -94,8 +94,18 @@ variable "db_subnet_ids" {
   }
 }
 
+variable "db_subnet_group_name" {
+  description = "Aurora クラスター用のDBサブネットグループ名"
+  type        = string
+}
+
 variable "application_security_group_id" {
-  description = "Aurora へのアクセスを許可するアプリケーション（ECS等）のセキュリティグループ ID"
+  description = "Auroraへのアクセスを許可するアプリケーション（ECS等）のセキュリティグループID"
+  type        = string
+}
+
+variable "database_security_group_id" {
+  description = "databaseのセキュリティグループ ID"
   type        = string
 }
 

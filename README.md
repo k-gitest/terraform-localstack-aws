@@ -78,13 +78,18 @@ LocalStackを用いることで、ローカル環境でAWSサービスをエミ�
 │   │   ├── network/            # VPC・ネットワーク関連一式（サブネット, SG等含む）
 │   │   │   ├── main.tf         # VPC, IGW, Subnet, Route Table, Security Groupなどの構成
 │   │   │   ├── variables.tf
+│   │   │   ├── security_group.tf # セキュリティグループとルールの管理
 │   │   │   └── outputs.tf
 │   │   ├── rds/                # RDSデータベースモジュール
 │   │   │   ├── main.tf         # RDSインスタンス、パラメータグループ、セキュリティグループ定義
 │   │   │   ├── variables.tf
 │   │   │   └── outputs.tf
-│   │   └── aurora/             # Auroraデータベースモジュール
-│   │       ├── main.tf         # Auroraクラスター、インスタンス、パラメータグループ、セキュリティグループ定義
+│   │   ├── aurora/             # Auroraデータベースモジュール
+│   │   │   ├── main.tf         # Auroraクラスター、インスタンス、パラメータグループ、セキュリティグループ定義
+│   │   │   ├── variables.tf
+│   │   │   └── outputs.tf
+│   │   └── alb/                # ALBモジュール
+│   │       ├── main.tf         # ALB本体、ターゲットグループ、HTTP/HTTPSリスナー、パスベースルーティングルール定義
 │   │       ├── variables.tf
 │   │       └── outputs.tf
 │   ├── main.tf                 # ルートモジュールのmain.tf (modules/ を呼び出す)

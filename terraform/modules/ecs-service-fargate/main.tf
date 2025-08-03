@@ -125,6 +125,33 @@ resource "aws_ecs_task_definition" "this" {
   })
 }
 
+# ALBターゲットグループ
+resource "aws_lb_target_group" "this" {
+  count = var.enable_load_balancer ? 1 : 0 # ロードバランサー有効時のみ作成
+
+  name                 = "${var.project_name}-${var.service_name}-${var.environment}-tg"
+  port                 = var.container_port
+  protocol             = "HTTP" # または HTTPS
+  vpc_id               = var.vpc_id # ルートからVPC IDを受け取る変数が必要です
+  target_type          = "ip"       # FargateはIPターゲット
+
+  health_check {
+    path                = var.health_check_path # 例: "/health"
+    protocol            = "HTTP"
+    matcher             = "200"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+  }
+
+  tags = merge(var.tags, {
+    Name        = "${var.project_name}-${var.service_name}-${var.environment}-tg"
+    Environment = var.environment
+    Project     = var.project_name
+  })
+}
+
 # --- ECS Service ---
 resource "aws_ecs_service" "this" {
   name            = var.service_name
@@ -140,9 +167,9 @@ resource "aws_ecs_service" "this" {
   }
 
   dynamic "load_balancer" {
-    for_each = var.enable_load_balancer && var.target_group_arn != "" ? [1] : []
+    for_each = var.enable_load_balancer ? [1] : []
     content {
-      target_group_arn = var.target_group_arn
+      target_group_arn = aws_lb_target_group.this[0].arn
       container_name   = var.load_balancer_container_name != "" ? var.load_balancer_container_name : (var.container_name != "" ? var.container_name : "${var.service_name}-container")
       container_port   = var.load_balancer_container_port != 0 ? var.load_balancer_container_port : var.container_port
     }
@@ -184,6 +211,50 @@ resource "aws_ecs_service" "this" {
     aws_cloudwatch_log_group.ecs_log_group
   ]
 }
+
+# Ingress Rule: Allow traffic from ALB to Fargate (if ALB is enabled)
+/*
+resource "aws_security_group_rule" "fargate_ingress_from_alb" {
+  count = var.alb_security_group_id != null ? 1 : 0 # ALB SG IDが渡された場合のみ作成
+
+  type                     = "ingress"
+  from_port                = var.container_port # Fargateサービスが公開するポート
+  to_port                  = var.container_port
+  protocol                 = var.container_protocol
+  security_group_id        = var.security_groups[0] # Fargateサービスにアタッチされる最初のSGのID
+  source_security_group_id = var.alb_security_group_id
+  description              = "Allow inbound from ALB on port ${var.container_port}"
+}
+*/
+
+# Egress Rule: Allow outbound traffic to Database
+/*
+resource "aws_security_group_rule" "fargate_egress_to_db" {
+  type                     = "egress"
+  from_port                = var.database_port
+  to_port                  = var.database_port
+  protocol                 = "tcp"
+  security_group_id        = var.security_groups[0] # Fargateサービスにアタッチされる最初のSGのID
+  source_security_group_id = var.database_security_group_id
+  description              = "Allow outbound to DB on port ${var.database_port}"
+}
+*/
+
+# Egress Rule: Allow outbound traffic to Public Internet (for ECR, CloudWatch Logs, updates, etc.)
+# Consider tightening this if VPC Endpoints are fully utilized.
+/*
+resource "aws_security_group_rule" "fargate_egress_to_public_internet" {
+  count = var.enable_public_internet_egress ? 1 : 0
+
+  type              = "egress"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1" # All protocols
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = var.security_groups[0] # Fargateサービスにアタッチされる最初のSGのID
+  description       = "Allow all outbound traffic to public internet"
+}
+*/
 
 # --- Auto Scaling Configuration ---
 resource "aws_appautoscaling_target" "ecs_service_target" {
