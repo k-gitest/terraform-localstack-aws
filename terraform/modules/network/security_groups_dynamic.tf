@@ -98,8 +98,22 @@ variable "environment_specific_rules" {
 # 環境固有のSSHルール
 resource "aws_vpc_security_group_ingress_rule" "app_ssh_env" {
   for_each = toset(
-    lookup(var.environment_specific_rules, var.environment, { allow_ssh = false, ssh_cidrs = [] }).allow_ssh ? 
-    lookup(var.environment_specific_rules, var.environment, { ssh_cidrs = [] }).ssh_cidrs : 
+    # デフォルト値にすべての属性を含める
+    lookup(var.environment_specific_rules, var.environment, {
+      allow_ssh = false
+      ssh_cidrs = []
+      allow_rdp = false
+      rdp_cidrs = []
+      debug_ports = []
+    }).allow_ssh ?
+    # こちらも同様にすべての属性を含める
+    lookup(var.environment_specific_rules, var.environment, {
+      allow_ssh = false
+      ssh_cidrs = []
+      allow_rdp = false
+      rdp_cidrs = []
+      debug_ports = []
+    }).ssh_cidrs :
     []
   )
 
@@ -121,7 +135,13 @@ resource "aws_vpc_security_group_ingress_rule" "app_ssh_env" {
 # デバッグポート（開発環境のみ）
 resource "aws_vpc_security_group_ingress_rule" "app_debug_ports" {
   for_each = toset([
-    for port in lookup(var.environment_specific_rules, var.environment, { debug_ports = [] }).debug_ports : 
+    for port in lookup(var.environment_specific_rules, var.environment, {
+      allow_ssh = false
+      ssh_cidrs = []
+      allow_rdp = false
+      rdp_cidrs = []
+      debug_ports = []
+    }).debug_ports :
     tostring(port)
   ])
 

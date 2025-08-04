@@ -73,27 +73,6 @@ output "instance_availability_zones" {
   }
 }
 
-# セキュリティ関連
-output "security_group_id" {
-  description = "Aurora 用セキュリティグループの ID"
-  value       = aws_security_group.aurora_security_group.id
-}
-
-output "security_group_arn" {
-  description = "Aurora 用セキュリティグループの ARN"
-  value       = aws_security_group.aurora_security_group.arn
-}
-
-output "subnet_group_name" {
-  description = "Aurora 用 DB サブネットグループ名"
-  value       = aws_db_subnet_group.aurora_subnet_group.name
-}
-
-output "subnet_group_arn" {
-  description = "Aurora 用 DB サブネットグループの ARN"
-  value       = aws_db_subnet_group.aurora_subnet_group.arn
-}
-
 # 暗号化関連
 output "kms_key_id" {
   description = "Aurora 暗号化用 KMS キーの ID"
@@ -225,9 +204,4 @@ output "connection_strings" {
       reader_connection = cluster.engine == "aurora-postgresql" ? "postgresql://${cluster.master_username}:[PASSWORD]@${cluster.reader_endpoint}:${cluster.port}/${cluster.database_name}" : "mysql://${cluster.master_username}:[PASSWORD]@${cluster.reader_endpoint}:${cluster.port}/${cluster.database_name}"
     }
   }
-}
-
-output "aurora_sg_id" {
-  description = "Aurora 用セキュリティグループの ID"
-  value       = aws_security_group.aurora_sg.id
 }

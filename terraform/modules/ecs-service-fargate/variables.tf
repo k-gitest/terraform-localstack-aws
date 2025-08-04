@@ -163,12 +163,6 @@ variable "assign_public_ip" {
 }
 
 # ロードバランサー設定
-variable "enable_load_balancer" {
-  description = "ロードバランサー統合を有効にする"
-  type        = bool
-  default     = false
-}
-
 variable "target_group_arn" {
   description = "ロードバランサーターゲットグループのARN"
   type        = string

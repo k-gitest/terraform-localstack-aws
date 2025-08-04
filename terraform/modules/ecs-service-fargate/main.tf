@@ -212,50 +212,6 @@ resource "aws_ecs_service" "this" {
   ]
 }
 
-# Ingress Rule: Allow traffic from ALB to Fargate (if ALB is enabled)
-/*
-resource "aws_security_group_rule" "fargate_ingress_from_alb" {
-  count = var.alb_security_group_id != null ? 1 : 0 # ALB SG IDが渡された場合のみ作成
-
-  type                     = "ingress"
-  from_port                = var.container_port # Fargateサービスが公開するポート
-  to_port                  = var.container_port
-  protocol                 = var.container_protocol
-  security_group_id        = var.security_groups[0] # Fargateサービスにアタッチされる最初のSGのID
-  source_security_group_id = var.alb_security_group_id
-  description              = "Allow inbound from ALB on port ${var.container_port}"
-}
-*/
-
-# Egress Rule: Allow outbound traffic to Database
-/*
-resource "aws_security_group_rule" "fargate_egress_to_db" {
-  type                     = "egress"
-  from_port                = var.database_port
-  to_port                  = var.database_port
-  protocol                 = "tcp"
-  security_group_id        = var.security_groups[0] # Fargateサービスにアタッチされる最初のSGのID
-  source_security_group_id = var.database_security_group_id
-  description              = "Allow outbound to DB on port ${var.database_port}"
-}
-*/
-
-# Egress Rule: Allow outbound traffic to Public Internet (for ECR, CloudWatch Logs, updates, etc.)
-# Consider tightening this if VPC Endpoints are fully utilized.
-/*
-resource "aws_security_group_rule" "fargate_egress_to_public_internet" {
-  count = var.enable_public_internet_egress ? 1 : 0
-
-  type              = "egress"
-  from_port         = 0
-  to_port           = 0
-  protocol          = "-1" # All protocols
-  cidr_blocks       = ["0.0.0.0/0"]
-  security_group_id = var.security_groups[0] # Fargateサービスにアタッチされる最初のSGのID
-  description       = "Allow all outbound traffic to public internet"
-}
-*/
-
 # --- Auto Scaling Configuration ---
 resource "aws_appautoscaling_target" "ecs_service_target" {
   count = var.enable_autoscaling ? 1 : 0

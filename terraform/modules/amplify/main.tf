@@ -30,11 +30,11 @@ resource "aws_amplify_branch" "this" {
   stage               = var.branch_stage # DEVELOPMENT, PRODUCTION, STAGING, EXPERIMENTAL, AUTODETECT
   enable_auto_build   = var.enable_auto_build # デフォルトでtrueが望ましい
 
-  # `display_name` と `framework` は aws_amplify_branch の有効な属性です
+  # display_nameとframeworkはaws_amplify_branchの有効な属性です
   display_name        = var.branch_display_name
   framework           = var.branch_framework
 
   # 注意: プルリクエストプレビューを有効にする、またはその設定を調整するには、
-  # 通常、ブランチが作成された後に AWS Amplify Console UI を使用するか、
-  # プロジェクトのセットアップに適用可能な場合は、より高度な Amplify CLI / Gen 2 の設定を検討してください。
+  # 通常、ブランチが作成された後にAWS Amplify Console UIを使用するか、
+  # プロジェクトのセットアップに適用可能な場合は、より高度なAmplify CLI / Gen 2の設定を検討してください。
 }

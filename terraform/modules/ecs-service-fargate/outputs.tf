@@ -47,8 +47,3 @@ output "target_group_arn" {
   description = "The ARN of the ALB target group created for this ECS service."
   value       = var.enable_load_balancer ? aws_lb_target_group.this[0].arn : null
 }
-
-output "fargate_sg_id" {
-  description = "Fargate security group ID"
-  value       = aws_security_group.fargate.id
-}
