@@ -9,9 +9,10 @@ LocalStackを用いることで、ローカル環境でAWSサービスをエミ�
 ## 使用技術
 - Terraform
 - Terraform Cloud
-- aws s3
+- AWS各サービス / AWS CLI
 - LocalStack
-- Codespaces
+- Docker
+- github / github CLI
 
 ## 準備
 - github access token
@@ -25,6 +26,7 @@ LocalStackを用いることで、ローカル環境でAWSサービスをエミ�
 - SSMパラメータ
 - CORS用ドメイン名の更新
 - ECR用のDockerイメージ
+- sslが必要な場合はssl証明書
 
 ## 構成
 ```text
@@ -373,6 +375,17 @@ countメタ引数を用いてリソースが条件付きで作成される場合
 
 ## 設計によるコードの一元管理とヒューマンエラーの削減
 本プロジェクトでは、各環境ディレクトリで必要なモジュールを直接呼び出す代わりに、共通のルートTerraform構成 (terraform/ ディレクトリ) をモジュールとして呼び出し、その中でリソースの作成を制御する設計を採用しています。このアプローチは、以下の課題を解決するために選択されました。
+
+**リソース作成の流れ**
+flowchart LR
+    A["開発者"] --> B{"make local-xxxを実行"}
+    B --> C["terraform/environments/localが実行される"]
+    C --> D["terraform/main.tfが呼び出される"]
+    D --> E["locals-*.tfを読み込み"]
+    E --> F["各モジュールに設定値を渡す"]
+    F --> G["各モジュールが実行される"]
+    G --> H["リソース作成 (LocalStack/AWS)"]
+    H --> I["完了"]
 
 **コードの重複とメンテナンスコストの増大**:
 もし各環境ディレクトリ（environments/local、environments/dev、environments/prod）のmain.tfで個別にS3バケットやLambda関数などのモジュールを呼び出す場合、多くのコードが重複します。例えば、ある共通モジュールの入力変数を追加したり、その設定を変更したりするたびに、すべての環境のmain.tfを手動で修正する必要が生じます。これは大規模なプロジェクトになるほど、非常に手間がかかり、非効率的です。
