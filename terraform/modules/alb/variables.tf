@@ -89,12 +89,6 @@ variable "ssl_certificate_arn" {
   default     = ""
 }
 
-variable "ssl_policy" {
-  description = "SSL policy for HTTPS listener"
-  type        = string
-  default     = "ELBSecurityPolicy-TLS-1-2-2017-01"
-}
-
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)

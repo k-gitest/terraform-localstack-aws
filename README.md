@@ -392,17 +392,135 @@ flowchart LR
     H --> I["完了"]
 ```
 
-**コードの重複とメンテナンスコストの増大**:
+### システム概要図
+```mermaid
+graph TB
+    subgraph "🔍 システム概要 - ユーザー視点"
+        Users[👥 Users] --> Frontend[React App<br/>S3 Static Website]
+        Users --> API[REST API<br/>via ALB]
+        API --> Backend[Backend Service<br/>ECS Fargate]
+        Backend --> Database[(Database<br/>RDS/Aurora)]
+        
+        Users --> Upload[File Upload]
+        Upload --> Processing[Auto Processing<br/>Lambda]
+    end
+```
+
+### ネットワーク構成図
+```mermaid
+graph TB
+    subgraph "🌐 ネットワーク構成"
+        subgraph VPC["VPC (10.0.0.0/16)"]
+            subgraph PublicZone["パブリックゾーン"]
+                PubSub1[Public Subnet 1<br/>10.0.1.0/24<br/>AZ-a]
+                PubSub2[Public Subnet 2<br/>10.0.2.0/24<br/>AZ-b]
+                ALB[Application<br/>Load Balancer]
+                Fargate[ECS Fargate<br/>Tasks]
+            end
+            
+            subgraph PrivateZone["プライベートゾーン"]
+                PrivSub1[Private Subnet 1<br/>10.0.11.0/24<br/>AZ-a]
+                PrivSub2[Private Subnet 2<br/>10.0.12.0/24<br/>AZ-b]
+                RDS[(RDS Instance)]
+                Aurora[(Aurora Cluster)]
+            end
+        end
+        
+        Internet[🌐 Internet] --> IGW[Internet Gateway]
+        IGW --> PubSub1
+        IGW --> PubSub2
+        
+        Internet -->|HTTP/HTTPS<br/>Port 80/443| ALB
+        ALB -->|Port 8080| Fargate
+        
+        PubSub1 --> ALB
+        PubSub2 --> ALB
+        PubSub1 --> Fargate
+        PubSub2 --> Fargate
+        
+        PrivSub1 --> RDS
+        PrivSub2 --> Aurora
+        
+        Fargate -->|PostgreSQL<br/>Port 5432| RDS
+        Fargate -->|MySQL<br/>Port 3306| Aurora
+        Fargate -->|HTTPS/HTTP<br/>Port 443/80| Internet
+    end
+```
+
+### セキュリティグループ構成図
+```mermaid
+
+graph TB
+    subgraph "🔒 セキュリティグループ構成"
+        subgraph Internet["🌐 インターネット"]
+            Users[👥 Users<br/>0.0.0.0/0]
+        end
+        
+        subgraph ALBSG["🛡️ ALB Security Group"]
+            ALB[Application<br/>Load Balancer]
+        end
+        
+        subgraph AppSG["🛡️ Application Security Group"]
+            Fargate[ECS Fargate<br/>Backend Service]
+        end
+        
+        subgraph DBSG["🛡️ Database Security Group"]
+            RDS[(RDS<br/>PostgreSQL)]
+            Aurora[(Aurora<br/>MySQL)]
+        end
+        
+        subgraph VPCESG["🛡️ VPC Endpoint Security Group"]
+            VPCE[VPC Endpoints<br/>S3, ECR, etc.]
+        end
+        
+        subgraph External["🌐 外部サービス"]
+            S3[S3 APIs]
+            APIs[External APIs]
+        end
+        
+        %% インバウンドルール
+        Users -->|HTTP: 80<br/>HTTPS: 443| ALB
+        ALB -->|App Port: 8080| Fargate
+        Fargate -->|PostgreSQL: 5432| RDS
+        Fargate -->|MySQL: 3306| Aurora
+        Fargate -->|HTTPS: 443| VPCE
+        
+        %% アウトバウンドルール（インターネット）
+        Fargate -->|HTTPS: 443<br/>HTTP: 80| S3
+        Fargate -->|HTTPS: 443<br/>HTTP: 80| APIs
+        
+        %% 条件付きルール（開発環境のみ）
+        subgraph DevOnly["🔧 開発環境のみ"]
+            DevSSH[Developer<br/>SSH Access]
+        end
+        DevSSH -.->|SSH: 22<br/>特定CIDR| Fargate
+    end
+    
+    %% スタイリング
+    classDef sgBox fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef internet fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef database fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef dev fill:#fff3e0,stroke:#f57c00,stroke-width:1px,stroke-dasharray: 5 5
+    
+    class ALBSG,AppSG,DBSG,VPCESG sgBox
+    class Internet,External internet
+    class RDS,Aurora database
+    class DevOnly,DevSSH dev
+```
+
+**コードの重複とメンテナンスコストの増大**:   
 もし各環境ディレクトリ（environments/local、environments/dev、environments/prod）のmain.tfで個別にS3バケットやLambda関数などのモジュールを呼び出す場合、多くのコードが重複します。例えば、ある共通モジュールの入力変数を追加したり、その設定を変更したりするたびに、すべての環境のmain.tfを手動で修正する必要が生じます。これは大規模なプロジェクトになるほど、非常に手間がかかり、非効率的です。
 
-**環境間の一貫性欠如とヒューマンエラーのリスク**:
+**環境間の一貫性欠如とヒューマンエラーのリスク**:   
 手動での複数ファイルの修正は、環境間での設定の不一致を引き起こしやすくなります。特定の環境で修正が漏れたり、誤った設定をしてしまったりするリスクが高まり、インフラの信頼性を損なう原因となります。また、プルリクエストのレビューでも、共通の変更がすべての環境で正しく適用されているかを確認する作業が複雑化します。
 
 ### 現在の設計のメリット:
 
-**コードの一元化**: ほとんどのリソースモジュールの呼び出しと設定がルートのterraform/main.tfに集約されています。これにより、共通のインフラ構成を変更する際の修正箇所が最小限に抑えられ、単一の場所で全体像を把握し、管理できます。
+**コードの一元化**:   
+ほとんどのリソースモジュールの呼び出しと設定がルートのterraform/main.tfに集約されています。これにより、共通のインフラ構成を変更する際の修正箇所が最小限に抑えられ、単一の場所で全体像を把握し、管理できます。
 
-**ヒューマンエラーの削減**: 共通部分の変更は一箇所に集中するため、環境間での設定の不一致や修正漏れといったヒューマンエラーのリスクが大幅に低減されます。
+**ヒューマンエラーの削減**:   
+共通部分の変更は一箇所に集中するため、環境間での設定の不一致や修正漏れといったヒューマンエラーのリスクが大幅に低減されます。
 
 ### トレードオフと考慮事項:
 

@@ -26,44 +26,6 @@ variable "private_subnet_cidrs" {
   default     = []
 }
 
-variable "ingress_rules" {
-  description = "Fargateセキュリティグループのイングレスルール"
-  type = list(object({
-    from_port       = number
-    to_port         = number
-    protocol        = string
-    cidr_blocks     = list(string)
-    security_groups = optional(list(string), [])
-  }))
-  default = [
-    {
-      from_port   = 80
-      to_port     = 80
-      protocol    = "tcp"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
-  ]
-}
-
-variable "egress_rules" {
-  description = "Fargateセキュリティグループのエグレスルール"
-  type = list(object({
-    from_port       = number
-    to_port         = number
-    protocol        = string
-    cidr_blocks     = list(string)
-    security_groups = optional(list(string), [])
-  }))
-  default = [
-    {
-      from_port   = 0
-      to_port     = 0
-      protocol    = "-1"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
-  ]
-}
-
 variable "tags" {
   description = "リソースに適用するタグ"
   type        = map(string)

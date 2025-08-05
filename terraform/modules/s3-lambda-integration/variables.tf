@@ -44,45 +44,9 @@ variable "lambda_filter_suffix" {
   default     = null
 }
 
-# 複数のフィルター条件（高度な設定）
-variable "lambda_filters" {
-  description = "複数のフィルター条件"
-  type = list(object({
-    prefix = optional(string)
-    suffix = optional(string)
-  }))
-  default = []
-}
-
 # 権限設定
 variable "statement_id" {
   description = "Lambda権限のステートメントID"
   type        = string
   default     = null
-}
-
-variable "source_account" {
-  description = "S3バケットのアカウントID（セキュリティ強化）"
-  type        = string
-  default     = null
-}
-
-# 通知設定の有効化フラグ
-variable "enable_notification" {
-  description = "S3イベント通知を有効にするかどうか"
-  type        = bool
-  default     = true
-}
-
-# 複数Lambda関数への通知設定
-variable "lambda_configurations" {
-  description = "複数のLambda関数への通知設定"
-  type = list(object({
-    lambda_function_arn = string
-    events              = list(string)
-    filter_prefix       = optional(string)
-    filter_suffix       = optional(string)
-    id                  = optional(string)
-  }))
-  default = []
 }

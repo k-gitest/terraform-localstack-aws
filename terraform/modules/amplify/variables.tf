@@ -32,11 +32,6 @@ variable "environment_variables" {
   default     = {}
 }
 
-variable "environment" {
-  description = "ルートモジュールから受け取るデプロイメント環境"
-  type        = string
-}
-
 variable "custom_rules" {
   description = "Amplifyアプリのカスタムリダイレクト/リライトルールのリスト"
   type = list(object({
@@ -85,24 +80,6 @@ variable "branch_display_name" {
 
 variable "branch_framework" {
   description = "ブランチのフレームワーク（例：REACT、NEXTJS）"
-  type        = string
-  default     = null
-}
-
-variable "enable_auto_pr_with_fork_branches" {
-  description = "フォークリポジトリのブランチからの自動ビルドを有効にする"
-  type        = bool
-  default     = false # 通常はfalseが安全
-}
-
-variable "enable_pull_request_preview" {
-  description = "ブランチのプルリクエストプレビューを有効にする"
-  type        = bool
-  default     = false
-}
-
-variable "pull_request_preview_repository_name" {
-  description = "プルリクエストプレビューに使用するリポジトリ名（メインリポジトリと異なる場合）"
   type        = string
   default     = null
 }
