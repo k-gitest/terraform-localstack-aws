@@ -380,7 +380,7 @@ countメタ引数を用いてリソースが条件付きで作成される場合
 
 リソースがどのようにプロビジョニングされるかの全体像は以下の通りです。
 
-```Mermaid
+```mermaid
 flowchart LR
     A["開発者"] --> B{"make local-xxxを実行"}
     B --> C["terraform/environments/localが実行される"]
