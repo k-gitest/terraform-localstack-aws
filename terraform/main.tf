@@ -4,7 +4,9 @@ module "frontend_app_s3" {
   
   bucket_name = local.s3_buckets.frontend.name
   enable_website_hosting = local.s3_buckets.frontend.website_hosting
-  enable_public_read_policy = local.s3_buckets.frontend.public_read
+
+  policy_type = local.s3_buckets.frontend.policy_type
+
   enable_versioning = local.s3_buckets.frontend.versioning
   enable_encryption = local.s3_buckets.frontend.encryption
   
@@ -35,7 +37,7 @@ module "user_content_s3_buckets" {
   
   upload_static_files = false
   enable_website_hosting = false
-  enable_public_read_policy = false
+  policy_type = each.value.policy_type
   
   block_public_acls = true
   block_public_policy = true
@@ -52,6 +54,29 @@ module "user_content_s3_buckets" {
   
   tags = merge(local.common_tags, {
     ContentType = each.key
+  })
+}
+
+# CloudFrontモジュール
+module "cloudfront" {
+  for_each = local.cloudfront_enabled_buckets
+  source = "./modules/cloudfront"
+
+  project_name   = var.project_name
+  environment    = var.environment
+  bucket_type    = each.key
+  
+  # S3バケットのドメイン名を取得
+  s3_bucket_domain_name = each.key == "frontend" ? module.frontend_app_s3.s3_bucket_domain_name : module.user_content_s3_buckets[each.key].s3_bucket_domain_name
+  
+  # CloudFront設定
+  default_cache_behavior        = each.value.cache_behavior
+  origin_access_control_enabled = each.value.origin_access_control_enabled
+  default_root_object          = each.value.default_root_object
+  custom_error_responses       = each.value.custom_error_responses
+  
+  tags = merge(local.common_tags, {
+    BucketType = each.key
   })
 }
 

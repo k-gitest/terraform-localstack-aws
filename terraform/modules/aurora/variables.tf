@@ -8,6 +8,26 @@ variable "environment" {
   type        = string
 }
 
+variable "vpc_id" {
+  description = "Aurora クラスターを配置する VPC の ID"
+  type        = string
+}
+
+variable "db_subnet_ids" {
+  description = "Aurora クラスター用のサブネット ID のリスト（最低2つのAZが必要）"
+  type        = list(string)
+  
+  validation {
+    condition     = length(var.db_subnet_ids) >= 2
+    error_message = "Aurora クラスターには最低2つのサブネットが必要です。"
+  }
+}
+
+variable "application_security_group_id" {
+  description = "Auroraへのアクセスを許可するアプリケーション（ECS等）のセキュリティグループID"
+  type        = string
+}
+
 variable "aurora_configs" {
   description = "Auroraクラスターの設定マップ"
   type = map(object({

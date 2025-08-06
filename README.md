@@ -53,6 +53,11 @@ LocalStackを用いることで、ローカル環境でAWSサービスをエミ�
 │   │   │   ├── main.tf         # S3モジュールのリソース定義 (s3バケットなど)
 │   │   │   ├── variables.tf    # S3モジュール固有の変数定義
 │   │   │   └── outputs.tf      # S3モジュール固有の出力定義
+│   │   ├── cloudfront/         # cloudfrontモジュールのディレクトリ
+│   │   │   ├── main.tf         # ディストリビューション、キャッシュ、アクセスコントロールなどの定義
+│   │   │   ├── variables.tf    
+│   │   │   ├── bucket_policy.tf  
+│   │   │   └── outputs.tf      
 │   │   ├── lambda/
 │   │   │   ├── main.tf         # Lambda関数、IAMロール、ポリシー
 │   │   │   ├── variables.tf

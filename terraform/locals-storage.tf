@@ -8,7 +8,8 @@ locals {
       versioning = true
       encryption = true
       website_hosting = true
-      public_read = true
+      #public_read = true
+      policy_type = var.environment == "local" ? "public-read" : "cloudfront-oac"
     }
     
     user_content = {
@@ -19,6 +20,7 @@ locals {
         max_file_size = 2097152  # 2MB
         allowed_types = ["image/jpeg", "image/png", "image/webp"]
         lifecycle_days = 30
+        policy_type = "private"
       }
       
       user_documents = {
@@ -28,6 +30,7 @@ locals {
         max_file_size = 10485760  # 10MB
         allowed_types = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml"]
         lifecycle_days = 90
+        policy_type = "private"
       }
       
       temp_uploads = {
@@ -41,7 +44,57 @@ locals {
           "application/zip", "text/plain"
         ]
         auto_delete_days = 1
+        policy_type = "private"
       }
+    }
+  }
+
+  # CloudFrontを適用するバケットの設定
+  cloudfront_enabled_buckets = var.environment == "local" ? {} : {
+    # フロントエンド用
+    frontend = {
+      cache_behavior = {
+        default_ttl = 86400      # 1日
+        max_ttl     = 31536000   # 1年
+        min_ttl     = 0
+        compress    = true
+      }
+      origin_access_control_enabled = true
+      default_root_object = "index.html"
+      custom_error_responses = [
+        {
+          error_code         = 404
+          response_code      = 200
+          response_page_path = "/index.html"
+          error_caching_min_ttl = 300
+        },
+        {
+          error_code         = 403
+          response_code      = 200
+          response_page_path = "/index.html"
+          error_caching_min_ttl = 300
+        }
+      ]
+    }
+    
+    # プロフィール画像用（条件付き適用）
+    profile_pictures = {
+    cache_behavior = {
+    default_ttl = 604800     # 1週間
+    max_ttl     = 31536000   # 1年
+    min_ttl     = 86400      # 1日
+    compress    = true
+    }
+    origin_access_control_enabled = true
+    default_root_object = null
+    custom_error_responses = [
+    {
+    error_code         = 404
+    response_code      = 404
+    response_page_path = null
+    error_caching_min_ttl = 300
+     }
+    ]
     }
   }
 

@@ -65,25 +65,13 @@ resource "aws_s3_bucket_public_access_block" "this" {
   restrict_public_buckets = var.restrict_public_buckets
 }
 
-// === バケットポリシーの設定 (enable_public_read_policy が true の場合のみ作成) ===
 resource "aws_s3_bucket_policy" "this" {
-  count  = var.enable_public_read_policy ? 1 : 0
-  bucket = aws_s3_bucket.this.id # <-- このモジュールで作成した aws_s3_bucket.this を参照
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "PublicReadGetObject"
-        Effect    = "Allow"
-        Principal = "*"
-        Action    = "s3:GetObject"
-        Resource  = "${aws_s3_bucket.this.arn}/*"
-      },
-    ]
-  })
+  count  = local.current_config.create_policy ? 1 : 0
+  bucket = aws_s3_bucket.this.id
+  policy = jsonencode(local.current_config.policy_document)
 }
 
-# 作成したバケットのバージョニング設定 (enable_versioning が true の場合のみ作成)
+# 作成したバケットのバージョニング設定
 resource "aws_s3_bucket_versioning" "this" {
   count  = var.enable_versioning ? 1 : 0
   bucket = aws_s3_bucket.this.id # <-- このモジュールで作成した aws_s3_bucket.this を参照

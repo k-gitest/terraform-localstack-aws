@@ -51,10 +51,20 @@ variable "error_document_key" {
   default     = "error.html" # SPAの場合は index.html にオーバーライドする
 }
 
-variable "enable_public_read_policy" {
-  description = "バケットにパブリック読み取りポリシーを適用するかどうか（CloudFront OAI/OACを使用しない静的ウェブサイトで必要）"
-  type        = bool
-  default     = false # 通常は無効
+variable "policy_type" {
+  description = "バケットポリシーのタイプ（例：public_read, private, custom）"
+  type        = string
+  default     = "private"
+  validation {
+    condition = contains(["private", "public_read", "cloudfront_oac"], var.policy_type)
+    error_message = "Policy type must be one of: none, public_read, cloudfront_oac."
+  }
+}
+
+variable "cloudfront_distribution_arn" {
+  description = "CloudFrontディストリビューションのARN（OACポリシーを使用する場合に必要）"
+  type        = string
+  default     = null # デフォルトはnull（OACポリシーを使用しない）
 }
 
 variable "block_public_acls" {

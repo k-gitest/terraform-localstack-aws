@@ -31,6 +31,16 @@ variable "vpc_id" {
   type        = string
 }
 
+variable "db_subnet_ids" {
+  description = "Database subnet IDs"
+  type        = list(string)
+}
+
+variable "application_security_group_id" {
+  description = "アプリケーション用セキュリティグループID"
+  type        = string
+}
+
 variable "db_subnet_group_name" {
   description = "Database subnet group name"
   type        = string
