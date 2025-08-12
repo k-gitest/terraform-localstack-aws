@@ -26,6 +26,12 @@ variable "build_spec" {
   default     = null # nullをデフォルトにして任意にする
 }
 
+variable "environment" {
+  description = "Terraformの実行環境（例：local、development、production）"
+  type        = string
+  default     = "development"
+}
+
 variable "environment_variables" {
   description = "Amplifyアプリの環境変数"
   type        = map(string)

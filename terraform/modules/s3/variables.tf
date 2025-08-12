@@ -56,8 +56,8 @@ variable "policy_type" {
   type        = string
   default     = "private"
   validation {
-    condition = contains(["private", "public_read", "cloudfront_oac"], var.policy_type)
-    error_message = "Policy type must be one of: none, public_read, cloudfront_oac."
+    condition = contains(["private", "public-read", "cloudfront-oac"], var.policy_type)
+    error_message = "Policy type must be one of: private, public_read, cloudfront_oac."
   }
 }
 

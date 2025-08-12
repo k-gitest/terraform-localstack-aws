@@ -3,10 +3,15 @@
 
 # Terraform
 terraform/.terraform/
-terraform/*.tfstate
+terraform/* */.tfstate
 terraform/*.tfstate.*
 terraform/*.tfplan
 terraform/*.backup
+
+terraform.tfstate
+terraform.tfstate.backup
+
+.terraform.lock.hcl
 
 # Crash logs
 crash.log

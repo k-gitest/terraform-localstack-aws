@@ -115,6 +115,42 @@ LocalStackを用いることで、ローカル環境でAWSサービスをエミ�
 
 ```
 
+## セグメント分離構成
+```text
+
+terraform/
+├── segments/
+│   ├── foundation/              # 基盤セグメント
+│   │   ├── environments/
+│   │   │   ├── local/
+│   │   │   │   ├── provider.tf
+│   │   │   │   ├── main.tf      # ../..をモジュール呼び出し
+│   │   │   │   ├── variables.tf
+│   │   │   │   └── outputs.tf
+│   │   │   ├── dev/
+│   │   │   └── prod/
+│   │   ├── main.tf              # 基盤リソースのみ
+│   │   ├── variables.tf
+│   │   ├── outputs.tf           # 他セグメント向けのアウトプット
+│   │   ├── locals-network.tf    # ネットワーク設定
+│   │   └── locals-database.tf   # データベース設定
+│   ├── application/             # アプリケーションセグメント  
+│   │   ├── environments/
+│   │   ├── main.tf              # アプリケーションリソース
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   ├── remote_state.tf      # foundationからの取得
+│   │   ├── locals-storage.tf    # S3, CloudFront設定
+│   │   └── locals-compute.tf    # ECS, ALB設定
+│   └── data-processing/         # データ処理セグメント
+│       ├── environments/
+│       ├── main.tf              # Lambda, S3統合など
+│       ├── variables.tf
+│       ├── outputs.tf
+│       └── remote_state.tf      # foundationからの取得
+└── modules/                     # 既存モジュール
+```
+
 ## 設計によるコードの一元管理とヒューマンエラーの削減
 本プロジェクトでは、各環境ディレクトリで必要なモジュールを直接呼び出す代わりに、共通のルートTerraform構成 (terraform/ ディレクトリ) をモジュールとして呼び出し、その中でリソースの作成を制御する設計を採用しています。このアプローチは、以下の課題を解決するために選択されました。
 
@@ -156,7 +192,8 @@ flowchart LR
 ```mermaid
 graph TB
     subgraph "🔍 システム概要 - ユーザー視点"
-        Users[👥 Users] --> Frontend[React App<br/>S3 Static Website]
+        Users[👥 Users] --> CloudFront[CloudFront<br/>CDN]
+        CloudFront --> Frontend[React App<br/>S3 Static Website]
         Users --> API[REST API<br/>via ALB]
         API --> Backend[Backend Service<br/>ECS Fargate]
         Backend --> Database[(Database<br/>RDS/Aurora)]
@@ -186,7 +223,9 @@ graph TB
             end
         end
         
-        Internet[🌐 Internet] --> IGW[Internet Gateway]
+        Internet[🌐 Internet] --> CloudFront[CloudFront<br/>CDN]
+        CloudFront --> S3[S3 Static Website]
+        Internet --> IGW[Internet Gateway]
         IGW --> PubSub1
         IGW --> PubSub2
         
@@ -529,6 +568,69 @@ count = var.environment == "local" ? 1 : 0 // これはOK
 countメタ引数を用いてリソースが条件付きで作成される場合、Terraformはそのリソースを常に配列として扱います。そのため、たとえ count=1でリソースが作成されても、その属性を参照する際には配列インデックス ([0]) を指定する必要があります。
 
 また、count=0のためにリソースが作成されない場合、[0]インデックスでの直接参照はエラーになります。この問題を避けるためには、try(aws_resource_type.name[0].attribute, null) や length(aws_resource_type.name) > 0 ? aws_resource_type.name[0].attribute : null のような詳細な条件分岐が必要となり、Terraformコード全体が複雑化するため、特にルート構成で多数のリソースに適用される場合は、複雑さが増大する可能性があります。
+
+# Terraform Remote State 設定ガイド
+
+## LocalStackでローカルにS3バケットを作成
+
+ローカル開発環境でTerraformのstateファイルを管理するために、LocalStackを使ってS3バケットを作成します。
+
+```bash
+awslocal s3 mb s3://[バケット名]
+```
+
+## remote_stateで別のtfstateのoutputを取得
+
+### 設定方法
+
+他のTerraformプロジェクトのstateファイルからoutputを参照するには、`terraform_remote_state`データソースを使用します。backendで指定したS3バケット名とキー名を正しく設定してください。
+
+```terraform
+data "terraform_remote_state" "application" {
+  backend = "s3"
+  config = {
+    bucket = "your-terraform-state-bucket"
+    key    = "application/terraform.tfstate"
+    region = "ap-northeast-1"
+
+    # LocalStack使用時の設定
+    endpoints = {
+      s3 = "http://localhost:4566"
+    }
+
+    access_key = "test"
+    secret_key = "test"
+    skip_credentials_validation = true
+    skip_metadata_api_check = true
+    use_path_style = true
+    skip_requesting_account_id = true
+  }
+}
+```
+
+### outputの取得
+
+データソースから他のプロジェクトのoutputを取得できます。
+
+```terraform
+subnets = data.terraform_remote_state.foundation.outputs.public_subnet_ids
+```
+
+## ステートファイルの確認
+
+### ステートファイルをダウンロードして中身を見る
+
+`awslocal s3 cp`コマンドを使って、ステートファイルをローカルにダウンロードできます。
+
+```bash
+awslocal s3 cp s3://your-terraform-state-bucket/[パス]/terraform.tfstate .
+```
+
+## 注意点
+
+### outputsはトップレベルで行う
+
+`terraform apply`コマンドを実行するディレクトリで`outputs`を設定しないと、stateファイルには出力されません。他のプロジェクトから参照したいリソースは、必ずトップレベルでoutputを定義してください。
 
 ## object_ownershipの分離
 aws providerのバージョンアップによりAWS Provider v4.9.0以降はobject_ownershipが単独リソースとなっています。

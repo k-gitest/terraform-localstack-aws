@@ -57,6 +57,46 @@ module "user_content_s3_buckets" {
   })
 }
 
+# Amplifyアプリケーションモジュールの呼び出し
+module "amplify_app" {
+  count = var.environment == "local" ? 0 : 1
+
+  source = "./modules/amplify"
+
+  # locals から共通設定を参照
+  app_name            = local.amplify_app.app_name
+  repository_url      = local.amplify_app.repository_url
+  build_spec          = local.amplify_app.build_spec
+  custom_rules        = local.amplify_app.custom_rules
+  branch_name         = local.amplify_app.branch_name
+
+  # 環境変数とタグは、環境固有のlocalsを参照
+  environment_variables = local.amplify_app.environment_variables
+  branch_stage          = local.amplify_app.branch_stage
+
+  tags                  = local.common_tags
+
+  # その他、環境に依存する変数
+  github_oauth_token  = var.github_access_token
+  environment         = var.environment
+}
+
+# 他のモジュール呼び出し (S3, Lambdaなど)
+# module "my_s3_bucket" {
+#   source = "./modules/s3"
+#   bucket_name = "my-unique-application-data-bucket"
+# }
+
+# 例えば、Lambdaの環境変数にAmplifyのドメインを渡すことも可能
+# module "my_lambda" {
+#   source = "./modules/lambda"
+#   function_name = "my-backend-function"
+#   environment_variables = {
+#     AMPLIFY_FRONTEND_URL = "https://${module.amplify_app.amplify_app_default_domain}"
+#   }
+#   # ... other variables
+# }
+
 # CloudFrontモジュール
 module "cloudfront" {
   for_each = local.cloudfront_enabled_buckets

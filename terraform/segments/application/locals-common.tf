@@ -66,41 +66,4 @@ locals {
     "http://localhost:3000",
     "http://127.0.0.1:3000"
   ]
-
-  # Amplifyアプリケーションの共通設定
-  amplify_app = {
-    app_name            = "my-awesome-amplify-app"
-    repository_url      = "https://github.com/your-org/your-amplify-repo.git"
-    branch_name         = "main"
-    build_spec = <<-EOT
-      version: 1
-      frontend:
-        phases:
-          preBuild:
-            commands:
-              - npm ci
-          build:
-            commands:
-              - npm run build
-        artifacts:
-          baseDirectory: build
-          files:
-            - '**/*'
-    EOT
-    custom_rules = [
-      {
-        source = "/<*>"
-        target = "/index.html"
-        status = "200"
-      }
-    ]
-
-    # 環境ごとの設定
-    branch_stage = var.environment == "prod" ? "PRODUCTION" : "DEVELOPMENT"
-    environment_variables = {
-      # 環境ごとの変数
-      #VITE_API_URL = "https://${local.api_gateway_id}.execute-api.${local.aws_region}.amazonaws.com/prod"
-    }
-  }
-
 }

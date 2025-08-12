@@ -65,3 +65,42 @@ prod-destroy:
 
 prod-output:
 	cd terraform/environments/prod && terraform output
+
+# local-foundation
+.PHONY: local-foundation-init local-foundation-plan local-foundation-apply local-foundation-destroy local-foundation-output
+local-foundation-init:
+	cd terraform/segments/foundation/environments/local && terraform init
+local-foundation-plan:
+	cd terraform/segments/foundation/environments/local && terraform plan
+local-foundation-apply:
+	cd terraform/segments/foundation/environments/local && terraform apply
+local-foundation-destroy:
+	cd terraform/segments/foundation/environments/local && terraform destroy
+local-foundation-output:
+	cd terraform/segments/foundation/environments/local && terraform output
+
+# local-application
+.PHONY: local-application-init local-application-plan local-application-apply local-application-destroy local-application-output
+local-application-init:
+	cd terraform/segments/application/environments/local && terraform init
+local-application-plan:
+	cd terraform/segments/application/environments/local && terraform plan
+local-application-apply:
+	cd terraform/segments/application/environments/local && terraform apply
+local-application-destroy:
+	cd terraform/segments/application/environments/local && terraform destroy
+local-application-output:
+	cd terraform/segments/application/environments/local && terraform output
+
+# local-data-processing
+.PHONY: local-data-processing-init local-data-processing-plan local-data-processing-apply local-data-processing-destroy local-data-processing-output
+local-data-processing-init:
+	cd terraform/segments/data-processing/environments/local && terraform init
+local-data-processing-plan:
+	cd terraform/segments/data-processing/environments/local && terraform plan
+local-data-processing-apply:
+	cd terraform/segments/data-processing/environments/local && terraform apply
+local-data-processing-destroy:
+	cd terraform/segments/data-processing/environments/local && terraform destroy
+local-data-processing-output:
+	cd terraform/segments/data-processing/environments/local && terraform output
