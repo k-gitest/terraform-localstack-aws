@@ -1,6 +1,8 @@
 .terraform/
 .terraform/environment
 
+.terragrunt-cache/
+
 # Terraform
 terraform/.terraform/
 terraform/* */.tfstate

@@ -151,6 +151,52 @@ terraform/
 └── modules/                     # 既存モジュール
 ```
 
+## Terragrunt構成
+```text
+terraform/
+├── terragrunt.hcl              # ルート共通設定
+├── live/
+│   ├── local/
+│   │   ├── terragrunt.hcl      # 環境別共通設定
+│   │   ├── faundation/
+│   │   │   ├── terragrunt.hcl  # サービス共通設定
+│   │   │   ├── network/
+│   │   │   │   └── terragrunt.hcl # モジュール別設定
+│   │   │   ├── rds/
+│   │   │   │   └── terragrunt.hcl
+│   │   │   ├── ecr/
+│   │   │   │   └── terragrunt.hcl
+│   │   │   └── ecs/
+│   │   │       └── terragrunt.hcl
+│   │   ├── application/
+│   │   │   ├── terragrunt.hcl
+│   │   │   ├── s3/
+│   │   │   │   └── terragrunt.hcl    
+│   │   │   ├── cloudfront/
+│   │   │   │   └── terragrunt.hcl
+│   │   │   ├── alb/
+│   │   │   │   └── terragrunt.hcl
+│   │   │   ├── amplify/
+│   │   │   │   └── terragrunt.hcl
+│   │   │   └── fargate/
+│   │   │       └── terragrunt.hcl
+│   │   └── data-processing/
+│   │       ├── terragrunt.hcl
+│   │       └── lambda/
+│   │           └── terragrunt.hcl
+│   ├── dev/
+│   │   ├── terragrunt.hcl
+│   │   ├── foundation/
+│   │   ├── application/
+│   │   └── data-processing/
+│   └── prod/
+│       ├── terragrunt.hcl
+│       ├── foundation/
+│       ├── application/
+│       └── data-processing/
+└── modules/
+```
+
 ## 設計によるコードの一元管理とヒューマンエラーの削減
 本プロジェクトでは、各環境ディレクトリで必要なモジュールを直接呼び出す代わりに、共通のルートTerraform構成 (terraform/ ディレクトリ) をモジュールとして呼び出し、その中でリソースの作成を制御する設計を採用しています。このアプローチは、以下の課題を解決するために選択されました。
 
