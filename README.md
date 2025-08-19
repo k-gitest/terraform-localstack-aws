@@ -154,8 +154,8 @@ terraform/
 ## Terragrunt構成
 ```text
 terraform/
-├── terragrunt.hcl              # ルート共通設定
 ├── live/
+│   ├── root.hcl          # ルート共通設定
 │   ├── local/
 │   │   ├── terragrunt.hcl      # 環境別共通設定
 │   │   ├── faundation/
