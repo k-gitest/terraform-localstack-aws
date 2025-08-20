@@ -3,7 +3,7 @@ include "root" {
   path = find_in_parent_folders("root.hcl")
 }
 
-# モジュールに渡す変数
-inputs = {
+# 環境の設定
+locals {
   instance_type = "t2.micro"
 }

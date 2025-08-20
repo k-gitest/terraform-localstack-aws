@@ -672,6 +672,17 @@ subnets = data.terraform_remote_state.foundation.outputs.public_subnet_ids
 awslocal s3 cp s3://your-terraform-state-bucket/[パス]/terraform.tfstate .
 ```
 
+## Terragruntによる設計
+terragruntを使うと、terraform機能をまとめて設定でき、共通化による設計が可能になります。
+1. terragrunt.hclによる設定の一元化
+Terragruntは、Terraformのバックエンドやプロバイダ、変数などの設定を**terragrunt.hclファイルに集約**します。これにより、同じ設定を複数のモジュールで繰り返して書く必要がなくなり、管理が楽になります。
+
+2. run-allコマンドによる依存関係の解決
+Terragruntのもう一つの重要な機能は、run-allコマンドです。これは、複数のモジュールにまたがるインフラストラクチャのデプロイを自動化します。dependencyブロックを使ってモジュール間の依存関係を定義すれば、Terragruntがデプロイ順序を自動的に解決してくれるため、手動での実行順序を気にする必要がありません。
+
+3. DRY（Don't Repeat Yourself）原則の徹底
+Terragruntは、DRY（Don't Repeat Yourself）原則を徹底的に適用します。共通設定を親ディレクトリのterragrunt.hclに記述し、子ディレクトリがそれを継承することで、設定の重複を大幅に削減します。これにより、設定変更があった場合でも、1ヶ所を修正するだけで済み、ミスのリスクを減らせます。
+
 ## 注意点
 
 ### outputsはトップレベルで行う
