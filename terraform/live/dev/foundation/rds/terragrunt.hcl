@@ -1,18 +1,13 @@
-include "env" {
+include "stack" {
   path = find_in_parent_folders("terragrunt.hcl")
-}
-
-include "root" {
-  path = find_in_parent_folders()
-  expose = true
+  expose = true # 親のlocalsを使用する場合はtrue
 }
 
 terraform {
-  source = "../../../../../modules//rds"
-}
+  source = "${include.stack.locals.module_root}/rds"
 
-locals {
-  env_vars = read_terragrunt_config(find_in_parent_folders("terragrunt.hcl"))
+  # modulesを別repo化 & git::参照にする場合は//にする
+  # source = "git::https://github.com/org/terraform-modules.git//rds?ref=v1.0.0"
 }
 
 # network モジュールに依存
@@ -28,14 +23,11 @@ dependency "network" {
 }
 
 inputs = {
-  project_name = local.env_vars.locals.common_vars.project_name
-  environment  = "dev"
+  # 基本設定
+  environment  = include.stack.locals.environment
+  project_name = include.stack.locals.project_name
   
-  # 元設計のlocal.rds_configsに相当
-  database_configs = {
-    # ここに具体的なDB設定を記述
-    # 元のlocals-database.tfの内容に基づく
-  }
+  database_configs = include.stack.locals.database_configs
   
   # networkモジュールからの依存関係
   vpc_id                        = dependency.network.outputs.vpc_id
@@ -44,5 +36,11 @@ inputs = {
   application_security_group_id = dependency.network.outputs.application_security_group_id
   database_security_group_id    = dependency.network.outputs.database_security_group_id
   
-  tags = local.env_vars.locals.common_vars.common_tags
+  # タグ
+  tags = merge(
+    include.stack.locals.common_tags,
+    {
+      Module = basename(get_terragrunt_dir())
+    }
+  )
 }

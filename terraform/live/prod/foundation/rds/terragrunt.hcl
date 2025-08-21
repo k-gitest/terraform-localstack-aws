@@ -1,43 +1,61 @@
-include {
-  path = find_in_parent_folders()
+include "stack" {
+  path = find_in_parent_folders("terragrunt.hcl")
+  expose = true # 親のlocalsを使用する場合はtrue
 }
 
 terraform {
-  source = "../../../../modules/foundation/rds"
+  source = "${include.stack.locals.module_root}/rds"
+
+  # modulesを別repo化 & git::参照にする場合は//にする
+  # source = "git::https://github.com/org/terraform-modules.git//rds?ref=v1.0.0"
+}
+
+# network モジュールに依存
+dependency "network" {
+  config_path = "../network"
+  mock_outputs = {
+    vpc_id = "vpc-mock"
+    private_subnet_ids = ["subnet-mock-1", "subnet-mock-2"]
+    db_subnet_group_name = "mock-subnet-group"
+    application_security_group_id = "sg-mock-app"
+    database_security_group_id = "sg-mock-db"
+  }
+}
+
+locals {
+  merged_database_configs = {
+    main_postgres = merge(
+      # lookup(map, key, default) defaultはkeyがmap内に存在しなかった場合に返されるデフォルト値
+      lookup(include.stack.locals.database_configs, "main_postgres", {}),
+      {
+        instance_class   = "db.t3.medium"
+        storage          = 100
+        skip_snapshot    = false
+        backup_retention = 7
+      }
+    )
+  }
 }
 
 inputs = {
-  rds_configs = {
-    main_postgres = {
-      engine         = "postgres"
-      engine_version = "14.7"
-      instance_class = "db.t3.medium"
-      storage        = 100
-      db_name        = "maindb"
-      username       = "appuser"
-      port           = 5432
-      family         = "postgres14"
-      skip_snapshot  = false
-      publicly_accessible = false
-      backup_retention    = 7
-      backup_window       = "03:00-04:00"
-      maintenance_window  = "sun:04:00-sun:05:00"
-    }
+  # 基本設定
+  environment  = include.stack.locals.environment
+  project_name = include.stack.locals.project_name
 
-    analytics_mysql = {
-      engine         = "mysql"
-      engine_version = "8.0.35"
-      instance_class = "db.t3.micro"
-      storage        = 20
-      db_name        = "analytics"
-      username       = "analytics_user"
-      port           = 3306
-      family         = "mysql8.0"
-      skip_snapshot  = true
-      publicly_accessible = false
-      backup_retention    = 5
-      backup_window       = "03:00-04:00"
-      maintenance_window  = "sun:04:00-sun:05:00"
+  database_configs = local.merged_database_configs
+
+  # networkモジュールからの依存関係
+  vpc_id                        = dependency.network.outputs.vpc_id
+  db_subnet_ids                 = dependency.network.outputs.private_subnet_ids
+  db_subnet_group_name          = dependency.network.outputs.db_subnet_group_name
+  application_security_group_id = dependency.network.outputs.application_security_group_id
+  database_security_group_id    = dependency.network.outputs.database_security_group_id
+  
+  # タグ
+  tags = merge(
+    include.stack.locals.common_tags,
+    {
+      Module = basename(get_terragrunt_dir())
     }
-  }
+  )
 }

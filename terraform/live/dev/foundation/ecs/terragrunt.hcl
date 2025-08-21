@@ -1,21 +1,17 @@
-include "env" {
+include "stack" {
   path = find_in_parent_folders("terragrunt.hcl")
-}
-
-include "root" {
-  path = find_in_parent_folders()
-  expose = true
+  expose = true # 親のlocalsを使用する場合はtrue
 }
 
 terraform {
-  source = "../../../../../modules//ecs-cluster"
+  source = "${include.stack.locals.module_root}/ecs-cluster"
+
+  # modulesを別repo化 & git::参照にする場合は//にする
+  # source = "git::https://github.com/org/terraform-modules.git//ecs-cluster?ref=v1.0.0"
 }
 
-locals {
-  env_vars = read_terragrunt_config(find_in_parent_folders("terragrunt.hcl"))
-}
-
-# network モジュールに依存
+# networkモジュールに依存
+/*
 dependency "network" {
   config_path = "../network"
   mock_outputs = {
@@ -23,15 +19,23 @@ dependency "network" {
     private_subnet_ids = ["subnet-mock-1", "subnet-mock-2"]
   }
 }
+*/
 
+# ecs-clusterに渡す値の設定
 inputs = {
-  # 元設計のlocal.ecs_clusterに相当
-  cluster_name              = "your-project-dev-cluster"  # または動的に設定
-  enable_fargate           = true
+  # 基本設定
+  environment  = include.stack.locals.environment
+  project_name = include.stack.locals.project_name
+
+  cluster_name              = "your-project-dev-cluster"
+  enable_fargate            = true
   enable_container_insights = true
   
-  environment  = "dev"
-  project_name = local.env_vars.locals.common_vars.project_name
-  
-  tags = local.env_vars.locals.common_vars.common_tags
+  # タグ
+  tags = merge(
+    include.stack.locals.common_tags,
+    {
+      Module = basename(get_terragrunt_dir())
+    }
+  )
 }

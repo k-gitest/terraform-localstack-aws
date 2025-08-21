@@ -158,7 +158,7 @@ terraform/
 │   ├── root.hcl          # ルート共通設定
 │   ├── local/
 │   │   ├── terragrunt.hcl      # 環境別共通設定
-│   │   ├── faundation/
+│   │   ├── foundation/
 │   │   │   ├── terragrunt.hcl  # サービス共通設定
 │   │   │   ├── network/
 │   │   │   │   └── terragrunt.hcl # モジュール別設定
@@ -674,6 +674,7 @@ awslocal s3 cp s3://your-terraform-state-bucket/[パス]/terraform.tfstate .
 
 ## Terragruntによる設計
 terragruntを使うと、terraform機能をまとめて設定でき、共通化による設計が可能になります。
+
 1. terragrunt.hclによる設定の一元化
 Terragruntは、Terraformのバックエンドやプロバイダ、変数などの設定を**terragrunt.hclファイルに集約**します。これにより、同じ設定を複数のモジュールで繰り返して書く必要がなくなり、管理が楽になります。
 
