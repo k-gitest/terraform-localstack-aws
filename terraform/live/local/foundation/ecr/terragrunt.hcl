@@ -1,15 +1,23 @@
-include {
+include "stack" {
   path = find_in_parent_folders()
 }
 
 terraform {
-  source = "../../../../modules/foundation/ecr"
+  source = "${include.stack.locals.module_root}/ecr"
 }
 
 inputs = {
-  ecr_repositories = {
-    backend          = "${local.project_name}-backend"
-    frontend         = "${local.project_name}-frontend"
-    image_processor  = "${local.project_name}-image-processor"
-  }
+  # 基本設定
+  environment  = include.stack.locals.environment
+  project_name = include.stack.locals.project_name
+
+  repository_name = "backend"
+  
+  # タグ
+  tags = merge(
+    include.stack.locals.common_tags,
+    {
+      Module = basename(get_terragrunt_dir())
+    }
+  )
 }

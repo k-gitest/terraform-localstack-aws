@@ -1,6 +1,7 @@
 # 共通変数の設定
 locals {
   project_name = "my-awesome-project"
+  aws_region = "ap-northeast-1"
 
   # 現在の環境名を取得
   # "dev/foundation/network" → "dev"
@@ -30,7 +31,7 @@ locals {
     Env       = local.environment
   }
 
-  # データベースの共通デフォルト値を定義
+  # データベースの共通デフォルト値(dev用)を定義
   database_configs = {
     main_postgres = {
       engine              = "postgres"
@@ -64,7 +65,43 @@ locals {
       maintenance_window = "sun:04:00-sun:05:00"
     }
   }
+
+  # Aurora設定
+  aurora_configs = {
+    main_aurora_postgres = {
+      engine            = "aurora-postgresql"
+      engine_version    = "14.9"
+      cluster_name      = "${local.project_name}-aurora-postgres-${local.environment}"
+      database_name     = "maindb"
+      master_username   = "postgres"
+      port             = 5432
+      
+      instances = {
+        writer = {
+          class = "db.r6g.medium" # dev用
+          public = false
+        }
+        reader = null #dev用
+      }
+      
+      backup_retention = 3 # dev用
+      backup_window = "03:00-04:00"
+      maintenance_window = "sun:04:00-sun:05:00"
+      storage_encrypted = true
+      deletion_protection = false # dev用
+      skip_snapshot = true #dev用
+      performance_insights = false # dev用
+      monitoring_interval = 0 # dev用
+      
+      serverlessv2_scaling = {
+        max_capacity = 4
+        min_capacity = 0.5
+      } # dev用
+    }
+  }
 }
+
+
 
 # Dev, Prod環境で共通のproviderとbackend設定を記述
 # Provider設定を動的に生成
@@ -81,7 +118,7 @@ terraform {
   }
 }
 provider "aws" {
-  region = "ap-northeast-1"
+  region = "${local.aws_region}"
 }
 EOF
 }
