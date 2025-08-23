@@ -2,6 +2,7 @@
 locals {
   project_name = "my-awesome-project"
   aws_region = "ap-northeast-1"
+  github_access_token = ""
 
   # 現在の環境名を取得
   # "dev/foundation/network" → "dev"
@@ -97,6 +98,195 @@ locals {
         max_capacity = 4
         min_capacity = 0.5
       } # dev用
+    }
+  }
+
+  # CORS設定
+  cors_origins = [
+    "https://dev.yourdomain.com",
+    "http://localhost:3000"
+  ]
+
+  # ALB設定
+  alb_config = {
+    name = "${local.project_name}-alb-${local.environment}"
+    internal = false
+    enable_deletion_protection = false # dev用
+    enable_access_logs = false # dev用
+    
+    target_groups = {
+      backend = {
+        name = "${local.project_name}-backend-tg-${local.environment}"
+        port = 8080
+        protocol = "HTTP"
+        target_type = "ip"
+        deregistration_delay = 30 # dev用
+        
+        health_check = {
+          enabled = true
+          healthy_threshold = 2
+          unhealthy_threshold = 2
+          timeout = 5
+          interval = 30 # dev用
+          path = local.app_config.health_path
+          matcher = "200"
+          protocol = "HTTP"
+          port = "traffic-port"
+        }
+      }
+      
+      frontend = {
+        name = "${local.project_name}-frontend-tg-${local.environment}"
+        port = 3000
+        protocol = "HTTP"
+        target_type = "ip"
+        deregistration_delay = 30 # dev用
+        
+        health_check = {
+          enabled = true
+          healthy_threshold = 2
+          unhealthy_threshold = 2
+          timeout = 5
+          interval = 30
+          path = "/"
+          matcher = "200"
+          protocol = "HTTP"
+          port = "traffic-port"
+        }
+      }
+    }
+    
+    listener_rules = {
+      api = {
+        priority = 100
+        target_group = "backend"
+        path_patterns = ["${/api}/*"]
+      }
+      health = {
+        priority = 200
+        target_group = "backend"
+        path_patterns = ["/health", "/healthz"]
+      }
+      static = {
+        priority = 300
+        target_group = "frontend"
+        path_patterns = ["/static/*", "/assets/*", "*.js", "*.css", "*.ico"]
+      }
+    }
+    
+    default_target_group = "frontend"
+  }
+
+  # 基本設定
+  app_config = {
+    name          = "my-awesome-app"
+    version       = "1.0.0"
+    backend_port  = 8080
+    frontend_port = 3000
+    api_prefix    = "/api"
+    health_path   = "/health"
+  }
+
+  # 環境別設定(defaultはdev用)
+  env_config = {
+    # コンテナリソース
+    backend_cpu    = 256
+    backend_memory = 512
+    frontend_cpu   = 256
+    frontend_memory = 512
+    
+    # レプリカ数
+    backend_replicas  = 1
+    frontend_replicas = 1
+    
+    # その他
+    log_level = "debug"
+    enable_https = false
+    enable_deletion_protection = false
+  }
+
+  # Amplifyアプリケーションの共通設定
+  amplify_app = {
+    app_name            = "my-awesome-amplify-app"
+    repository_url      = "https://github.com/your-org/your-amplify-repo.git"
+    branch_name         = "develop"
+    build_spec = <<-EOT
+      version: 1
+      frontend:
+        phases:
+          preBuild:
+            commands:
+              - npm ci
+          build:
+            commands:
+              - npm run build
+        artifacts:
+          baseDirectory: build
+          files:
+            - '**/*'
+    EOT
+    custom_rules = [
+      {
+        source = "/<*>"
+        target = "/index.html"
+        status = "200"
+      }
+    ]
+
+    # 環境ごとの設定
+    branch_stage = "DEVELOPMENT"
+    environment_variables = {
+      # 環境ごとの変数
+      #VITE_API_URL = "https://${local.api_gateway_id}.execute-api.${local.aws_region}.amazonaws.com/prod"
+    }
+  }
+
+  # cloudfront設定
+  cloudfront_enabled_buckets = {
+    # フロントエンド用
+    frontend = {
+      cache_behavior = {
+        default_ttl = 86400      # 1日
+        max_ttl     = 31536000   # 1年
+        min_ttl     = 0
+        compress    = true
+      }
+      origin_access_control_enabled = true
+      default_root_object = "index.html"
+      custom_error_responses = [
+        {
+          error_code         = 404
+          response_code      = 200
+          response_page_path = "/index.html"
+          error_caching_min_ttl = 300
+        },
+        {
+          error_code         = 403
+          response_code      = 200
+          response_page_path = "/index.html"
+          error_caching_min_ttl = 300
+        }
+      ]
+    }
+    
+    # プロフィール画像用（条件付き適用）
+    profile_pictures = {
+      cache_behavior = {
+        default_ttl = 604800     # 1週間
+        max_ttl     = 31536000   # 1年
+        min_ttl     = 86400      # 1日
+        compress    = true
+      }
+      origin_access_control_enabled = true
+      default_root_object = null
+      custom_error_responses = [
+        {
+          error_code         = 404
+          response_code      = 404
+          response_page_path = null
+          error_caching_min_ttl = 300
+        }
+      ]
     }
   }
 }
