@@ -205,6 +205,37 @@ locals {
     enable_deletion_protection = false
   }
 
+  # 環境変数設定
+  backend_env_vars = [
+    { name = "NODE_ENV", value = var.environment },
+    { name = "APP_PORT", value = tostring(local.app_config.backend_port) },
+    { name = "LOG_LEVEL", value = local.env_config.log_level },
+    { name = "API_VERSION", value = "v1" },
+    { name = "CORS_ORIGINS", value = join(",", local.cors_origins) },
+    { name = "JWT_EXPIRES_IN", value = var.environment == "prod" ? "24h" : "7d" },
+    { name = "RATE_LIMIT_WINDOW", value = "15" },
+    { name = "RATE_LIMIT_MAX", value = var.environment == "prod" ? "100" : "1000" },
+  ]
+
+  # シークレット設定
+  backend_secrets = [
+    {
+      name = "DB_PASSWORD"
+      valueFrom = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current[0].account_id}:parameter/${local.project_name}/${local.environment}/db-password"
+    },
+    {
+      name = "JWT_SECRET"
+      valueFrom = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current[0].account_id}:parameter/${local.project_name}/${local.environment}/jwt-secret"
+    }
+  ]
+
+  fargate_config = {
+    # コンテナリソース
+    backend_cpu    = 256
+    backend_memory = 512
+    backend_port  = 8080
+  }
+
   # Amplifyアプリケーションの共通設定
   amplify_app = {
     app_name            = "my-awesome-amplify-app"
@@ -287,6 +318,89 @@ locals {
           error_caching_min_ttl = 300
         }
       ]
+    }
+  }
+
+  #S3バケット設定
+  s3_buckets = {
+    frontend = {
+      name = "${var.project_name}-frontend-bucket-${var.environment}"
+      versioning = true
+      encryption = true
+      website_hosting = true
+      #public_read = true
+      policy_type = var.environment == "local" ? "public-read" : "cloudfront-oac"
+    }
+    
+    user_content = {
+      profile_pictures = {
+        name = "${var.project_name}-profile-pictures-${var.environment}"
+        versioning = true
+        encryption = true
+        max_file_size = 2097152  # 2MB
+        allowed_types = ["image/jpeg", "image/png", "image/webp"]
+        lifecycle_days = 30
+        policy_type = "private"
+      }
+      
+      user_documents = {
+        name = "${var.project_name}-user-documents-${var.environment}"
+        versioning = true
+        encryption = true
+        max_file_size = 10485760  # 10MB
+        allowed_types = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml"]
+        lifecycle_days = 90
+        policy_type = "private"
+      }
+      
+      temp_uploads = {
+        name = "${var.project_name}-temp-uploads-${var.environment}"
+        versioning = false
+        encryption = true
+        max_file_size = 52428800  # 50MB
+        allowed_types = [
+          "image/jpeg", "image/png", "image/webp", "image/gif",
+          "application/pdf", "text/csv", "application/json",
+          "application/zip", "text/plain"
+        ]
+        auto_delete_days = 1
+        policy_type = "private"
+      }
+    }
+  }
+
+  # Lambda設定
+  lambda_functions = {
+    image_processor = {
+      name = "${local.project_name}-image-processor-${local.environment}"
+      handler = "index.handler"
+      runtime = "python3.11"
+      timeout = 60 # dev用
+      memory = 512 # dev用
+      
+      environment = {
+        ENVIRONMENT = local.environment
+        LOG_LEVEL = local.env_config.log_level
+        PROJECT = local.project_name
+        MAX_IMAGE_SIZE = "10485760"
+        ALLOWED_FORMATS = "jpg,jpeg,png,webp,gif"
+        THUMBNAIL_SIZES = "150x150,300x300,600x600"
+      }
+    }
+    
+    auth_validator = {
+      name = "${local.project_name}-auth-validator-${local.environment}"
+      handler = "index.handler"
+      runtime = "nodejs18.x"
+      timeout = 30
+      memory = 256
+      
+      environment = {
+        ENVIRONMENT = local.environment
+        LOG_LEVEL = local.env_config.log_level
+        PROJECT = local.project_name
+        TOKEN_EXPIRY = "86400" # dev用
+      }
     }
   }
 }

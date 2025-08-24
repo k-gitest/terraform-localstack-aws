@@ -7,19 +7,31 @@ terraform {
   source = "${include.stack.locals.module_root}/cloudfront"
 }
 
+dependency "frontend_s3" {
+  config_path = "../../s3/frontend"
+  mock_outputs = {
+    s3_bucket_domain_name = "mock-frontend-app.s3.amazonaws.com"
+  }
+}
+
 inputs = {
-  project_name   = include.stack.locals.project_name
-  environment    = include.stack.locals.environment
-  bucket_type    = each.key
-  
-  # S3バケットのドメイン名を取得
-  s3_bucket_domain_name = each.key == "frontend" ? module.frontend_app_s3.s3_bucket_domain_name : module.user_content_s3_buckets[each.key].s3_bucket_domain_name
+  project_name                  = include.stack.locals.project_name
+  environment                   = include.stack.locals.environment
+  bucket_type                   = "frontend"
+
+  s3_bucket_domain_name         = dependency.frontend_s3.outputs.s3_bucket_domain_name
   
   # CloudFront設定
-  default_cache_behavior        = each.value.cache_behavior
-  origin_access_control_enabled = each.value.origin_access_control_enabled
-  default_root_object          = each.value.default_root_object
-  custom_error_responses       = each.value.custom_error_responses
+  default_cache_behavior = merge(
+    include.stack.locals.cloudfront_enabled_buckets.frontend.cache_behavior,
+    {
+      default_ttl = 86400   # 本番: 1日
+      min_ttl     = 3600    # 1時間
+    }
+  )
+  origin_access_control_enabled = include.stack.locals.cloudfront_enabled_buckets.frontend.origin_access_control_enabled
+  default_root_object           = include.stack.locals.cloudfront_enabled_buckets.frontend.default_root_object
+  custom_error_responses        = include.stack.locals.cloudfront_enabled_buckets.frontend.custom_error_responses
   
   # タグ
   tags = merge(
