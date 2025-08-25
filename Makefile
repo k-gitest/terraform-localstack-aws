@@ -1,3 +1,28 @@
+ENVS = local dev prod
+CMDS = init plan apply destroy output
+# 環境とterraformコマンドの組み合わせを作成する
+# ENVSをforeachでenvに格納し、addprefix関数でCMDSにenv-を付与する
+TARGETS = $(foreach env, $(ENVS), $(addprefix $(env)-, $(CMDS) ))
+# tgプレフィックス付きのターゲットを作成
+TG_TARGETS := $(foreach env,$(ENVS),$(addprefix tg-$(env)-,$(CMDS)))
+
+.PHONY: $(TARGETS) $(TG_TARGETS)
+## 通常のターゲット (`local-init`, `dev-plan` など)
+%-%: # ターゲットのパターンマッチをハイフン区切りで作成する
+# subst関数で-を空白に置き換え1つ目と2つ目をそれぞれ代入
+	@ENV=$(word 1,$(subst -, ,$@)); \
+	CMD=$(word 2,$(subst -, ,$@)); \
+	echo "--- 🛠️ Running 'terraform $$CMD' for environment: '$$ENV' ---"; \
+	cd terraform/environments/$$ENV && terraform $$CMD
+
+## `tg-` プレフィックス付きターゲット (`tg-local-init`, `tg-dev-plan` など)
+tg-%-%:
+	@ENV=$(word 2,$(subst -, ,$@)); \
+	CMD=$(word 3,$(subst -, ,$@)); \
+	echo "--- 🛠️ Running 'terraform $$CMD' with TG for environment: '$$ENV' ---"; \
+	cd terraform/environments/$$ENV && terraform $$CMD
+
+# 共通ルートモジュール設計用
 # Local環境
 .PHONY: local-init local-plan local-apply local-destroy local-output
 local-init:
@@ -32,23 +57,6 @@ dev-destroy:
 dev-output:
 	cd terraform/environments/dev && terraform output
 
-# Staging環境
-.PHONY: staging-init staging-plan staging-apply staging-destroy staging-output
-staging-init:
-	cd terraform/environments/staging && terraform init
-
-staging-plan:
-	cd terraform/environments/staging && terraform plan
-
-staging-apply:
-	cd terraform/environments/staging && terraform apply
-
-staging-destroy:
-	cd terraform/environments/staging && terraform destroy
-
-staging-output:
-	cd terraform/environments/staging && terraform output
-
 # Production環境
 .PHONY: prod-init prod-plan prod-apply prod-destroy prod-output
 prod-init:
@@ -66,6 +74,7 @@ prod-destroy:
 prod-output:
 	cd terraform/environments/prod && terraform output
 
+# segment毎に分離設計用
 # local-foundation
 .PHONY: local-foundation-init local-foundation-plan local-foundation-apply local-foundation-destroy local-foundation-output
 local-foundation-init:

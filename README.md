@@ -1,15 +1,18 @@
-# TerraformとLocalStackを用いたAWS環境（S3, Lambda, Amplify）のIaCプロビジョニング
-TerraformとLocalStackを使用してawsをコードで管理し自動作成
+# Terraformを用いたAWS環境のIaCプロビジョニング
+Terraformを使用してawsをコードで管理し自動作成
 
 ## 概要
-このプロジェクトは、**Infrastructure as Code (IaC)** の原則に基づき、**Terraform** と **LocalStack** を活用してAWS環境のプロビジョニングを自動化します。特に、S3バケット、Lambda関数、Amplifyアプリケーションといった主要なAWSリソースの定義とデプロイをコードで管理することで、開発・検証プロセスの効率化と一貫性の確保を目指します。
+このプロジェクトは、**Infrastructure as Code (IaC)** の原則に基づき、**Terraform** を活用してAWS環境のプロビジョニングを自動化します。S3バケット、Lambda関数、Amplifyアプリケーションといった主要なAWSリソースの定義とデプロイをコードで管理することで、開発・検証プロセスの効率化と一貫性の確保を目指します。
 
 LocalStackを用いることで、ローカル環境でAWSサービスをエミュレートし、本番環境へのデプロイ前に安全かつ迅速なテストを行うことが可能です。
+
+Terragruntを用いることで、Terraformの構成をDRY（Don't Repeat Yourself）に保ち、複数環境にわたるコードの重複を排除し、管理を簡素化します。
 
 ## 使用技術
 - Terraform
 - Terraform Cloud
 - AWS各サービス / AWS CLI
+- Terragrunt
 - LocalStack
 - Docker
 - github / github CLI
@@ -197,6 +200,13 @@ terraform/
 └── modules/
 ```
 
+## 設計パターン
+1. 基本的なTerraform構成: terraform/environments/ ディレクトリ配下で、環境ごとにプロバイダーや変数を定義し、共通のルートモジュール (../..) を呼び出すパターン。
+
+2. セグメント分離構成: terraform/segments/ ディレクトリ配下で、foundation、applicationといったインフラの役割ごとにディレクトリを分割し、remote_stateで相互に参照するパターン。
+
+3. Terragrunt構成: terraform/live/ ディレクトリ配下で、terragrunt.hclファイルを使って各モジュール (modules/) の呼び出しやバックエンド設定などを抽象化・共通化するパターン。
+
 ## 設計によるコードの一元管理とヒューマンエラーの削減
 本プロジェクトでは、各環境ディレクトリで必要なモジュールを直接呼び出す代わりに、共通のルートTerraform構成 (terraform/ ディレクトリ) をモジュールとして呼び出し、その中でリソースの作成を制御する設計を採用しています。このアプローチは、以下の課題を解決するために選択されました。
 
@@ -222,6 +232,7 @@ terraform/
 
 リソースがどのようにプロビジョニングされるかの全体像は以下の通りです。
 
+**Terraform**
 ```mermaid
 flowchart LR
     A["開発者"] --> B{"make local-xxxを実行"}
@@ -232,6 +243,20 @@ flowchart LR
     F --> G["各モジュールが実行される"]
     G --> H["リソース作成 (LocalStack/AWS)"]
     H --> I["完了"]
+```
+
+**Terragrunt**
+```mermaid
+graph LR
+    A[開発者] --> B{terragrunt apply を実行};
+    B --> C[live/local/foundation/network に移動];
+    C --> D[terragrunt.hcl を読み込む];
+    D --> E[親ディレクトリの設定を継承];
+    E --> F[live/local/terragrunt.hcl を読み込む];
+    F --> G[live/root.hcl を読み込む];
+    G --> H[すべての設定をマージ];
+    H --> I[modules/network のTerraformコードを参照];
+    I --> J[Terraform実行、ローカル環境のリソースを作成];
 ```
 
 ### システム概要図
