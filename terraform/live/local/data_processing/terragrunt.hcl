@@ -32,7 +32,7 @@ remote_state {
   backend = "s3"
   config = {
     bucket = "your-terraform-state-bucket"
-    key    = "data-processing/terraform.tfstate"
+    key    = "data_processing/terraform.tfstate"
     region = "ap-northeast-1"
 
     endpoints = {

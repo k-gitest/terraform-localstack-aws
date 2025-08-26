@@ -145,7 +145,7 @@ terraform/
 │   │   ├── remote_state.tf      # foundationからの取得
 │   │   ├── locals-storage.tf    # S3, CloudFront設定
 │   │   └── locals-compute.tf    # ECS, ALB設定
-│   └── data-processing/         # データ処理セグメント
+│   └── data_processing/         # データ処理セグメント
 │       ├── environments/
 │       ├── main.tf              # Lambda, S3統合など
 │       ├── variables.tf
@@ -174,16 +174,22 @@ terraform/
 │   │   ├── application/
 │   │   │   ├── terragrunt.hcl
 │   │   │   ├── s3/
-│   │   │   │   └── terragrunt.hcl    
+│   │   │   │   ├── frontend/
+│   │   │   │   │   └── terragrunt.hcl
+│   │   │   │   └── profile_pictures/
+│   │   │   │       └── terragrunt.hcl
 │   │   │   ├── cloudfront/
-│   │   │   │   └── terragrunt.hcl
+│   │   │   │   ├── frontend/
+│   │   │   │   │   └── terragrunt.hcl
+│   │   │   │   └── profile_pictures/
+│   │   │   │       └── terragrunt.hcl
 │   │   │   ├── alb/
 │   │   │   │   └── terragrunt.hcl
 │   │   │   ├── amplify/
 │   │   │   │   └── terragrunt.hcl
 │   │   │   └── fargate/
 │   │   │       └── terragrunt.hcl
-│   │   └── data-processing/
+│   │   └── data_processing/
 │   │       ├── terragrunt.hcl
 │   │       └── lambda/
 │   │           └── terragrunt.hcl

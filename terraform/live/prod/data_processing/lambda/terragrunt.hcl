@@ -8,7 +8,7 @@ terraform {
 }
 
 dependency "application" {
-  config_path = "../../application/s3/profile-pictures"
+  config_path = "../../application/s3/profile_pictures"
 }
 
 inputs = {
@@ -16,8 +16,8 @@ inputs = {
   lambda_zip_file = "${path.module}/image_processor.zip"
   handler = include.stack.locals.lambda_functions.image_processor.handler
   runtime = include.stack.locals.lambda_functions.image_processor.runtime
-  timeout = include.stack.locals.lambda_functions.image_processor.timeout
-  memory_size = include.stack.locals.lambda_functions.image_processor.memory
+  timeout = 300
+  memory_size = 1024
   
   environment_variables = include.stack.locals.lambda_functions.image_processor.environment
   

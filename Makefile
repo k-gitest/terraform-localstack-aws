@@ -3,10 +3,8 @@ CMDS = init plan apply destroy output
 # 環境とterraformコマンドの組み合わせを作成する
 # ENVSをforeachでenvに格納し、addprefix関数でCMDSにenv-を付与する
 TARGETS = $(foreach env, $(ENVS), $(addprefix $(env)-, $(CMDS) ))
-# tgプレフィックス付きのターゲットを作成
-TG_TARGETS := $(foreach env,$(ENVS),$(addprefix tg-$(env)-,$(CMDS)))
 
-.PHONY: $(TARGETS) $(TG_TARGETS)
+.PHONY: $(TARGETS)
 ## 通常のターゲット (`local-init`, `dev-plan` など)
 %-%: # ターゲットのパターンマッチをハイフン区切りで作成する
 # subst関数で-を空白に置き換え1つ目と2つ目をそれぞれ代入
@@ -15,12 +13,68 @@ TG_TARGETS := $(foreach env,$(ENVS),$(addprefix tg-$(env)-,$(CMDS)))
 	echo "--- 🛠️ Running 'terraform $$CMD' for environment: '$$ENV' ---"; \
 	cd terraform/environments/$$ENV && terraform $$CMD
 
-## `tg-` プレフィックス付きターゲット (`tg-local-init`, `tg-dev-plan` など)
-tg-%-%:
-	@ENV=$(word 2,$(subst -, ,$@)); \
+# セグメント定義
+SEGMENTS = foundation application data-processing
+# セグメント別のターゲット作成 (segment-env-cmd)
+SEGMENT_TARGETS = $(foreach segment, $(SEGMENTS), $(foreach env, $(ENVS), $(addprefix $(segment)-$(env)-, $(CMDS))))
+.PHONY: $(SEGMENT_TARGETS)
+## 個別セグメント実行 (foundation-dev-plan など)
+$(SEGMENT_TARGETS):
+	@SEGMENT=$(word 1,$(subst -, ,$@)); \
+	ENV=$(word 2,$(subst -, ,$@)); \
 	CMD=$(word 3,$(subst -, ,$@)); \
-	echo "--- 🛠️ Running 'terraform $$CMD' with TG for environment: '$$ENV' ---"; \
-	cd terraform/environments/$$ENV && terraform $$CMD
+	echo "--- 🛠️ Running 'terraform $$CMD' for segment: '$$SEGMENT' environment: '$$ENV' ---"; \
+	cd terraform/segments/$$SEGMENT/environments/$$ENV && terraform $$CMD
+
+
+# TerragruntプロジェクトのMakefile
+# セグメント、環境、コマンドの組み合わせのターゲットを生成
+TERRAGRUNT_TARGETS = $(foreach segment, $(SEGMENTS), $(foreach env, $(ENVS), $(addprefix $(segment)-$(env)-, $(CMDS))))
+
+# 各セグメントの個別モジュールを定義
+FOUNDATION_MODULES = network rds ecr ecs
+APPLICATION_MODULES = alb amplify fargate s3/frontend s3/profile-pictures cloudfront/frontend cloudfront/profile-pictures
+DATA_PROCESSING_MODULES = lambda
+
+# 個別モジュールのターゲットを生成 (例: foundation-dev-network-plan)
+FOUNDATION_MODULE_TARGETS = $(foreach env, $(ENVS), $(foreach module, $(FOUNDATION_MODULES), $(addprefix foundation-$(env)-$(module)-, $(CMDS))))
+APPLICATION_MODULE_TARGETS = $(foreach env, $(ENVS), $(foreach module, $(APPLICATION_MODULES), $(addprefix application-$(env)-$(module)-, $(CMDS))))
+DATA_PROCESSING_MODULE_TARGETS = $(foreach env, $(ENVS), $(foreach module, $(DATA_PROCESSING_MODULES), $(addprefix data-processing-$(env)-$(module)-, $(CMDS))))
+
+ALL_MODULE_TARGETS = $(FOUNDATION_MODULE_TARGETS) $(APPLICATION_MODULE_TARGETS) $(DATA_PROCESSING_MODULE_TARGETS)
+
+.PHONY: $(TERRAGRUNT_TARGETS) $(ALL_MODULE_TARGETS)
+
+# 特定のセグメントと環境に対してterragruntコマンドを実行
+%-%-%:
+	@SEGMENT=$(word 1,$(subst -, ,$@)); \
+	ENV=$(word 2,$(subst -, ,$@)); \
+	CMD=$(word 3,$(subst -, ,$@)); \
+	echo "--- 🛠️ Running 'terragrunt $$CMD' for segment: '$$SEGMENT' and environment: '$$ENV' ---"; \
+	cd terraform/live/$$ENV/$$SEGMENT && terragrunt $$CMD
+
+# 特定のモジュールに対してterragruntコマンドを実行
+%-%-%-%:
+	@SEGMENT=$(word 1,$(subst -, ,$@)); \
+	ENV=$(word 2,$(subst -, ,$@)); \
+	MODULE=$(word 3,$(subst -, ,$@)); \
+	CMD=$(word 4,$(subst -, ,$@)); \
+	echo "--- 🛠️ Running 'terragrunt $$CMD' for module: '$$MODULE' in environment: '$$ENV' ---"; \
+	cd terraform/live/$$ENV/$$SEGMENT/$$MODULE && terragrunt $$CMD
+
+# run-all 用ターゲット (例: foundation-dev-plan-all)
+RUN_ALL_TARGETS = $(foreach env, $(ENVS), $(foreach segment, $(SEGMENTS), $(addprefix $(segment)-$(env)-, $(addsuffix -all, $(CMDS)))))
+
+.PHONY: $(RUN_ALL_TARGETS)
+
+# run-all 実行ルール
+%-%-%-all:
+	@SEGMENT=$(word 1,$(subst -, ,$@)); \
+	ENV=$(word 2,$(subst -, ,$@)); \
+	CMD=$(word 3,$(subst -, ,$@)); \
+	echo "--- 🚀 Running 'terragrunt run-all $$CMD' for segment: '$$SEGMENT' and environment: '$$ENV' ---"; \
+	cd terraform/live/$$ENV/$$SEGMENT && terragrunt run-all $$CMD
+
 
 # 共通ルートモジュール設計用
 # Local環境

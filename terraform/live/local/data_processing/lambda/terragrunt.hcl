@@ -3,7 +3,7 @@ include {
 }
 
 terraform {
-  source = "../../../../modules/data-processing/lambda"
+  source = "../../../../modules/data_processing/lambda"
 }
 
 locals {
