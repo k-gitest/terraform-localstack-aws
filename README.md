@@ -1,4 +1,4 @@
-# Terraformを用いたAWS環境のIaCプロビジョニング
+# Terraformを用いたAWS環境のIaCプロビジョニング(aws-iac-module-architecture)
 Terraformを使用してawsをコードで管理し自動作成
 
 ## 概要
@@ -16,6 +16,7 @@ Terragruntを用いることで、Terraformの構成をDRY（Don't Repeat Yourse
 - LocalStack
 - Docker
 - github / github CLI
+- Makefile
 
 ## 準備
 - github access token
@@ -114,6 +115,7 @@ Terragruntを用いることで、Terraformの構成をDRY（Don't Repeat Yourse
 │   └── locals-compute.tf       # ECS・Lambda・ALB関連
 ├── README.md
 ├── Makefile
+├── workflow
 └── .gitignore
 
 ```
@@ -197,12 +199,12 @@ terraform/
 │   │   ├── terragrunt.hcl
 │   │   ├── foundation/
 │   │   ├── application/
-│   │   └── data-processing/
+│   │   └── data_processing/
 │   └── prod/
 │       ├── terragrunt.hcl
 │       ├── foundation/
 │       ├── application/
-│       └── data-processing/
+│       └── data_processing/
 └── modules/
 ```
 
