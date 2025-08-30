@@ -1,0 +1,325 @@
+name: Terraform Plan (Basic)
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'terraform/**'
+      - 'bootstrap/**'
+      - '.github/workflows/terraform-*.yml'
+
+env:
+  TF_VERSION: "1.5.0"
+  AWS_REGION: "ap-northeast-1"
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+# 環境とセグメントをgit diffから取得し変数に格納する
+jobs:
+  detect-changes:
+    name: Detect Changed Environments
+    runs-on: ubuntu-latest
+    outputs:
+      environments: ${{ steps.detect.outputs.environments }}
+      segments: ${{ steps.detect.outputs.segments }}
+      has_changes: ${{ steps.detect.outputs.has_changes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Changes
+        id: detect
+        run: |
+          # 変更されたファイルを取得 ...三点リーダで既存コミットから最新コミットまでを比較する
+          # grepでパターンマッチする為、^()などを-Eで拡張正規表現にしている || trueでterraform関連以外の変更コミットもエラーにしない
+          changed_files=$(git diff --name-only origin/main...HEAD | grep -E '^(terraform|bootstrap)/' || true)
+          
+          # $changed_filesの存在チェックで、空だった場合の出力設定、要はterraform関連じゃない場合はhas_changesにfalseを入れる
+          if [ -z "$changed_files" ]; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "environments=[]" >> $GITHUB_OUTPUT
+            echo "segments=[]" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # $changed_filesが空じゃない場合、has_changesにtrueを入れて出力する
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+          echo "Changed files:"
+          echo "$changed_files"
+          
+          # 環境を検出
+          # grepで-o ( --only-matching の短縮形) を使用して環境文字だけ取得（例：environments/dev）
+          # cutで-dの区切り文字を/に指定し、-f2として2番目のフィールド文字列を取得（例：dev）
+          # sortして-u（unique）で重複を削除
+          # jq -R -s -c 'split("\n")[:-1]'で1行のJSON配列に変換　
+          # -R (raw input)　jqに与えられた入力を、JSONとしてパースするのではなく、単なる文字列として読み込ませます
+          # -s (slurp)　-Rで読み込んだ複数の文字列を、1つの配列にまとめてからjqフィルタに渡します
+          # 例えば、入力がdev\nprod\nの場合、-Rだけでは"dev"と"prod"が別々に処理されますが、-Rsを組み合わせると、"dev\nprod\n"と一つの文字列になる
+          # -c (compact output) jqの出力を改行なしのコンパクトな1行にします
+          # 改行をsplitで区切り、末尾改行による空文字列を[:-1]で末尾から一つ前と指定して配列から除外する（例：["dev", "prod", ""] => ["dev", "prod"]）
+          
+          environments=$(echo "$changed_files" | grep -oE 'environments/(local|dev|prod)' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
+          echo "environments=$environments" >> $GITHUB_OUTPUT
+          
+          # セグメントを検出
+          segments=$(echo "$changed_files" | grep -oE 'segments/(foundation|application|data_processing)' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
+          echo "segments=$segments" >> $GITHUB_OUTPUT
+          
+          echo "Detected environments: $environments"
+          echo "Detected segments: $segments"
+
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_changes == 'true'
+    strategy:
+      matrix:
+        environment: ${{ fromJson(needs.detect-changes.outputs.environments) }}
+      fail-fast: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', matrix.environment)] || secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Bootstrap Check
+        id: bootstrap-check
+        run: |
+          echo "Checking if bootstrap is required for ${{ matrix.environment }}..."
+          if [ ! -f "bootstrap/.terraform.lock.hcl" ] || [ ! -d "bootstrap/.terraform" ]; then
+            echo "needs_bootstrap=true" >> $GITHUB_OUTPUT
+          else
+            echo "needs_bootstrap=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Bootstrap Plan
+        if: steps.bootstrap-check.outputs.needs_bootstrap == 'true'
+        working-directory: ./bootstrap
+        run: |
+          terraform init
+          terraform plan -var="environment=${{ matrix.environment }}"
+
+      - name: Terraform Plan (Standard)
+        id: plan-standard
+        run: |
+          echo "Running plan for environment: ${{ matrix.environment }}"
+          make ${{ matrix.environment }}-plan
+        continue-on-error: true
+
+      - name: Format Plan Output
+        if: always()
+        id: format
+        run: |
+          # プラン結果をフォーマット
+          if [ "${{ steps.plan-standard.outcome }}" = "success" ]; then
+            echo "PLAN_STATUS=✅ Success" >> $GITHUB_ENV
+          else
+            echo "PLAN_STATUS=❌ Failed" >> $GITHUB_ENV
+          fi
+
+      - name: Comment PR (Standard)
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const environment = '${{ matrix.environment }}';
+            const status = process.env.PLAN_STATUS;
+            const outcome = '${{ steps.plan-standard.outcome }}';
+            
+            const body = `
+            ## 📋 Terraform Plan Results (Standard)
+            
+            **Environment**: \`${environment}\`
+            **Status**: ${status}
+            **Configuration**: \`terraform/environments/${environment}/\`
+            
+            ${outcome === 'success' ? 
+              '✅ Plan completed successfully. Review the changes before merging.' : 
+              '❌ Plan failed. Please check the logs and fix any issues.'
+            }
+            
+            <details>
+            <summary>📁 Configuration Details</summary>
+            
+            - **Path**: \`terraform/environments/${environment}/\`
+            - **Command**: \`make ${environment}-plan\`
+            - **Provider**: Standard Terraform
+            
+            </details>
+            `;
+            
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const existingComment = comments.find(comment => 
+              comment.body.includes(`## 📋 Terraform Plan Results (Standard)`) &&
+              comment.body.includes(`**Environment**: \`${environment}\``)
+            );
+            
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+  segment-plan:
+    name: Segment Plan
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_changes == 'true' && needs.detect-changes.outputs.segments != '[]'
+    strategy:
+      matrix:
+        segment: ${{ fromJson(needs.detect-changes.outputs.segments) }}
+        environment: ${{ fromJson(needs.detect-changes.outputs.environments) }}
+      fail-fast: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', matrix.environment)] || secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Segment Plan
+        id: plan-segment
+        run: |
+          echo "Running segment plan for: ${{ matrix.segment }}-${{ matrix.environment }}"
+          make seg-${{ matrix.segment }}-${{ matrix.environment }}-plan
+        continue-on-error: true
+
+      - name: Comment PR (Segment)
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const segment = '${{ matrix.segment }}';
+            const environment = '${{ matrix.environment }}';
+            const outcome = '${{ steps.plan-segment.outcome }}';
+            const status = outcome === 'success' ? '✅ Success' : '❌ Failed';
+            
+            const body = `
+            ## 🧩 Segment Plan Results
+            
+            **Segment**: \`${segment}\`
+            **Environment**: \`${environment}\`
+            **Status**: ${status}
+            **Configuration**: \`terraform/segments/${segment}/environments/${environment}/\`
+            
+            ${outcome === 'success' ? 
+              '✅ Segment plan completed successfully.' : 
+              '❌ Segment plan failed. Please check the logs.'
+            }
+            
+            <details>
+            <summary>📁 Segment Details</summary>
+            
+            - **Path**: \`terraform/segments/${segment}/environments/${environment}/\`
+            - **Command**: \`make seg-${segment}-${environment}-plan\`
+            - **Type**: Segment-based configuration
+            
+            </details>
+            `;
+            
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const existingComment = comments.find(comment => 
+              comment.body.includes(`## 🧩 Segment Plan Results`) &&
+              comment.body.includes(`**Segment**: \`${segment}\``) &&
+              comment.body.includes(`**Environment**: \`${environment}\``)
+            );
+            
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+  plan-summary:
+    name: Plan Summary
+    runs-on: ubuntu-latest
+    needs: [detect-changes, terraform-plan, segment-plan]
+    if: always() && needs.detect-changes.outputs.has_changes == 'true'
+    steps:
+      - name: Summary Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const standardResult = '${{ needs.terraform-plan.result }}';
+            const segmentResult = '${{ needs.segment-plan.result }}';
+            
+            let summary = `## 📊 Terraform Plan Summary\n\n`;
+            
+            if (standardResult !== 'skipped') {
+              summary += `**Standard Configuration**: ${standardResult === 'success' ? '✅' : '❌'} ${standardResult}\n`;
+            }
+            
+            if (segmentResult !== 'skipped') {
+              summary += `**Segment Configuration**: ${segmentResult === 'success' ? '✅' : '❌'} ${segmentResult}\n`;
+            }
+            
+            summary += `\n### 🔍 Next Steps\n`;
+            
+            if (standardResult === 'success' || segmentResult === 'success') {
+              summary += `- ✅ Review the plan details above\n`;
+              summary += `- ✅ Merge this PR to apply changes\n`;
+            } else {
+              summary += `- ❌ Fix any plan errors before merging\n`;
+            }
+            
+            summary += `\n---\n*Generated by GitHub Actions*`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });

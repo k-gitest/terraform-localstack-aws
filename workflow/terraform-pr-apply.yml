@@ -1,0 +1,299 @@
+name: Terraform Apply (Basic)
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'terraform/**'
+      - 'bootstrap/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target Environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - local
+          - dev
+          - prod
+      configuration_type:
+        description: 'Configuration Type'
+        required: true
+        default: 'standard'
+        type: choice
+        options:
+          - standard
+          - segment
+      segment:
+        description: 'Segment (if segment type selected)'
+        required: false
+        type: choice
+        options:
+          - foundation
+          - application
+          - data_processing
+      dry_run:
+        description: 'Dry run (plan only)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  TF_VERSION: "1.5.0"
+  AWS_REGION: "ap-northeast-1"
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write
+
+jobs:
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    outputs:
+      environments: ${{ steps.detect.outputs.environments }}
+      segments: ${{ steps.detect.outputs.segments }}
+      has_changes: ${{ steps.detect.outputs.has_changes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect Changes
+        id: detect
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "environments=[\"${{ github.event.inputs.environment }}\"]" >> $GITHUB_OUTPUT
+            if [ "${{ github.event.inputs.segment }}" != "" ]; then
+              echo "segments=[\"${{ github.event.inputs.segment }}\"]" >> $GITHUB_OUTPUT
+            else
+              echo "segments=[]" >> $GITHUB_OUTPUT
+            fi
+            exit 0
+          fi
+          
+          # プッシュ時の変更検出
+          changed_files=$(git diff --name-only HEAD~1 HEAD | grep -E '^(terraform|bootstrap)/' || true)
+          
+          if [ -z "$changed_files" ]; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "environments=[]" >> $GITHUB_OUTPUT
+            echo "segments=[]" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+          
+          # 環境検出
+          environments=$(echo "$changed_files" | grep -oE 'environments/(local|dev|prod)' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
+          echo "environments=$environments" >> $GITHUB_OUTPUT
+          
+          # セグメント検出
+          segments=$(echo "$changed_files" | grep -oE 'segments/(foundation|application|data_processing)' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
+          echo "segments=$segments" >> $GITHUB_OUTPUT
+
+  terraform-apply-standard:
+    name: Apply Standard Configuration
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: |
+      needs.detect-changes.outputs.has_changes == 'true' && 
+      (github.event.inputs.configuration_type == 'standard' || 
+       (github.event_name == 'push' && needs.detect-changes.outputs.environments != '[]'))
+    strategy:
+      matrix:
+        environment: ${{ fromJson(needs.detect-changes.outputs.environments || github.event.inputs.environment && format('["{0}"]', github.event.inputs.environment) || '["dev"]') }}
+      fail-fast: false
+    environment:
+      name: ${{ matrix.environment }}
+      url: ${{ steps.outputs.outputs.environment_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', matrix.environment)] || secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Bootstrap Apply
+        working-directory: ./bootstrap
+        run: |
+          echo "🚀 Applying bootstrap configuration for ${{ matrix.environment }}..."
+          terraform init
+          terraform plan -var="environment=${{ matrix.environment }}"
+          terraform apply -auto-approve -var="environment=${{ matrix.environment }}"
+
+      - name: Wait for Bootstrap
+        run: |
+          echo "⏳ Waiting for bootstrap resources to be ready..."
+          sleep 30
+
+      - name: Terraform Init
+        run: make ${{ matrix.environment }}-init
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          echo "📋 Running plan for ${{ matrix.environment }}..."
+          make ${{ matrix.environment }}-plan
+
+      - name: Terraform Apply
+        id: apply
+        if: github.event.inputs.dry_run != 'true'
+        run: |
+          echo "🚀 Applying changes for ${{ matrix.environment }}..."
+          make ${{ matrix.environment }}-apply
+
+      - name: Get Outputs
+        id: outputs
+        if: success()
+        run: |
+          echo "📤 Getting outputs for ${{ matrix.environment }}..."
+          outputs=$(make ${{ matrix.environment }}-output)
+          echo "terraform_outputs<<EOF" >> $GITHUB_OUTPUT
+          echo "$outputs" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          # 環境URLの設定（例）
+          if [ "${{ matrix.environment }}" = "prod" ]; then
+            echo "environment_url=https://prod.example.com" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.environment }}" = "dev" ]; then
+            echo "environment_url=https://dev.example.com" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Apply Status
+        if: always()
+        run: |
+          if [ "${{ steps.apply.outcome }}" = "success" ]; then
+            echo "✅ Apply completed successfully for ${{ matrix.environment }}"
+          elif [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "📋 Dry run completed for ${{ matrix.environment }}"
+          else
+            echo "❌ Apply failed for ${{ matrix.environment }}"
+            exit 1
+          fi
+
+  terraform-apply-segments:
+    name: Apply Segment Configuration
+    runs-on: ubuntu-latest
+    needs: [detect-changes, terraform-apply-standard]
+    if: |
+      needs.detect-changes.outputs.has_changes == 'true' && 
+      needs.detect-changes.outputs.segments != '[]' &&
+      (github.event.inputs.configuration_type == 'segment' || github.event_name == 'push')
+    strategy:
+      matrix:
+        segment: ${{ fromJson(needs.detect-changes.outputs.segments || github.event.inputs.segment && format('["{0}"]', github.event.inputs.segment) || '[]') }}
+        environment: ${{ fromJson(needs.detect-changes.outputs.environments || github.event.inputs.environment && format('["{0}"]', github.event.inputs.environment) || '["dev"]') }}
+      fail-fast: false
+    environment:
+      name: ${{ matrix.environment }}-${{ matrix.segment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', matrix.environment)] || secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Segment Apply
+        id: apply-segment
+        run: |
+          echo "🚀 Applying segment: ${{ matrix.segment }} for environment: ${{ matrix.environment }}"
+          
+          # セグメントの依存関係を考慮した実行順序
+          case "${{ matrix.segment }}" in
+            "foundation")
+              echo "🏗️ Applying foundation segment..."
+              make seg-foundation-${{ matrix.environment }}-init
+              make seg-foundation-${{ matrix.environment }}-plan
+              if [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
+                make seg-foundation-${{ matrix.environment }}-apply
+              fi
+              ;;
+            "application")
+              echo "📱 Applying application segment..."
+              make seg-application-${{ matrix.environment }}-init
+              make seg-application-${{ matrix.environment }}-plan
+              if [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
+                make seg-application-${{ matrix.environment }}-apply
+              fi
+              ;;
+            "data_processing")
+              echo "📊 Applying data processing segment..."
+              make seg-data_processing-${{ matrix.environment }}-init
+              make seg-data_processing-${{ matrix.environment }}-plan
+              if [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
+                make seg-data_processing-${{ matrix.environment }}-apply
+              fi
+              ;;
+          esac
+
+      - name: Segment Status
+        if: always()
+        run: |
+          if [ "${{ steps.apply-segment.outcome }}" = "success" ]; then
+            echo "✅ Segment ${{ matrix.segment }} applied successfully for ${{ matrix.environment }}"
+          elif [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "📋 Segment ${{ matrix.segment }} dry run completed for ${{ matrix.environment }}"
+          else
+            echo "❌ Segment ${{ matrix.segment }} apply failed for ${{ matrix.environment }}"
+            exit 1
+          fi
+
+  deploy-summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [detect-changes, terraform-apply-standard, terraform-apply-segments]
+    if: always() && needs.detect-changes.outputs.has_changes == 'true'
+    steps:
+      - name: Create Deployment Summary
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 📊 Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Standard Configuration**: ${{ needs.terraform-apply-standard.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Segment Configuration**: ${{ needs.terraform-apply-segments.result }}" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🛠️ Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "- **Mode**: 🔍 Dry Run (Plan Only)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Mode**: 🚀 Full Apply" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🎯 Environments Processed" >> $GITHUB_STEP_SUMMARY
+          echo '${{ needs.detect-changes.outputs.environments }}' | jq -r '.[]' | while read env; do
+            echo "- \`$env\`" >> $GITHUB_STEP_SUMMARY
+          done || echo "- None detected" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify on Failure
+        if: failure()
+        run: |
+          echo "❌ Deployment failed. Please check the logs and fix any issues."
+          echo "🔍 Check the Actions tab for detailed error information."

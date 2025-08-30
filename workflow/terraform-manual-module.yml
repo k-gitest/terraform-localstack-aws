@@ -1,0 +1,262 @@
+name: Terraform Manual (Module Level)
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+      execution_level:
+        description: 'Execution Level'
+        required: true
+        default: 'segment'
+        type: choice
+        options:
+          - segment
+          - module
+          - terragrunt-segment
+          - terragrunt-module
+      environment:
+        description: 'Target Environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - local
+          - dev
+          - prod
+      segment:
+        description: 'Target Segment'
+        required: true
+        default: 'foundation'
+        type: choice
+        options:
+          - foundation
+          - application
+          - data_processing
+      module:
+        description: 'Target Module (if module level selected)'
+        required: false
+        type: choice
+        options:
+          # Foundation modules
+          - network
+          - rds
+          - ecr
+          - ecs
+          # Application modules
+          - alb
+          - amplify
+          - fargate
+          - s3__frontend
+          - s3__profile_pictures
+          - cloudfront__frontend
+          - cloudfront__profile_pictures
+          # Data processing modules
+          - lambda
+      confirmation:
+        description: 'Type "CONFIRM" to proceed with destructive actions'
+        required: false
+        type: string
+
+env:
+  TF_VERSION: "1.5.0"
+  TG_VERSION: "0.55.1"
+  AWS_REGION: "ap-northeast-1"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  validation:
+    name: Input Validation
+    runs-on: ubuntu-latest
+    outputs:
+      validated: ${{ steps.validate.outputs.validated }}
+      command: ${{ steps.validate.outputs.command }}
+      warning_message: ${{ steps.validate.outputs.warning_message }}
+    steps:
+      - name: Validate Inputs
+        id: validate
+        run: |
+          # 破壊的操作の確認
+          if [ "${{ github.event.inputs.action }}" = "destroy" ] || [ "${{ github.event.inputs.action }}" = "apply" ]; then
+            if [ "${{ github.event.inputs.confirmation }}" != "CONFIRM" ]; then
+              echo "❌ Destructive action requires confirmation. Type 'CONFIRM' in the confirmation field."
+              exit 1
+            fi
+          fi
+          
+          # モジュールレベル実行の警告
+          warning=""
+          if [ "${{ github.event.inputs.execution_level }}" = "module" ] || [ "${{ github.event.inputs.execution_level }}" = "terragrunt-module" ]; then
+            if [ "${{ github.event.inputs.module }}" = "" ]; then
+              echo "❌ Module must be specified for module-level execution"
+              exit 1
+            fi
+            warning="⚠️ Module-level execution can cause dependency issues. Use with caution."
+          fi
+          
+          # コマンド生成
+          case "${{ github.event.inputs.execution_level }}" in
+            "segment")
+              command="seg-${{ github.event.inputs.segment }}-${{ github.event.inputs.environment }}-${{ github.event.inputs.action }}"
+              ;;
+            "module")
+              command="seg-${{ github.event.inputs.segment }}-${{ github.event.inputs.environment }}-${{ github.event.inputs.action }}"
+              warning="⚠️ Module-level execution via make is limited. Consider using terragrunt for better module isolation."
+              ;;
+            "terragrunt-segment")
+              command="tg-${{ github.event.inputs.segment }}-${{ github.event.inputs.environment }}-${{ github.event.inputs.action }}-all"
+              ;;
+            "terragrunt-module")
+              module_path=$(echo "${{ github.event.inputs.module }}" | sed 's|__|/|g')
+              command="tg-${{ github.event.inputs.segment }}-${{ github.event.inputs.environment }}-${module_path}-${{ github.event.inputs.action }}"
+              ;;
+          esac
+          
+          echo "validated=true" >> $GITHUB_OUTPUT
+          echo "command=$command" >> $GITHUB_OUTPUT
+          echo "warning_message=$warning" >> $GITHUB_OUTPUT
+          
+          echo "🎯 Execution plan:"
+          echo "  Level: ${{ github.event.inputs.execution_level }}"
+          echo "  Environment: ${{ github.event.inputs.environment }}"
+          echo "  Segment: ${{ github.event.inputs.segment }}"
+          echo "  Module: ${{ github.event.inputs.module }}"
+          echo "  Command: $command"
+          if [ "$warning" != "" ]; then
+            echo "  Warning: $warning"
+          fi
+
+  execute:
+    name: Execute Terraform
+    runs-on: ubuntu-latest
+    needs: validation
+    if: needs.validation.outputs.validated == 'true'
+    environment: 
+      name: ${{ github.event.inputs.environment }}${{ github.event.inputs.execution_level == 'module' && format('-{0}', github.event.inputs.module) || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', github.event.inputs.environment)] || secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Setup Terragrunt
+        if: startsWith(github.event.inputs.execution_level, 'terragrunt')
+        run: |
+          wget -O terragrunt https://github.com/gruntwork-io/terragrunt/releases/download/v${{ env.TG_VERSION }}/terragrunt_linux_amd64
+          chmod +x terragrunt
+          sudo mv terragrunt /usr/local/bin/
+
+      - name: Display Warning
+        if: needs.validation.outputs.warning_message != ''
+        run: |
+          echo "🚨 WARNING: ${{ needs.validation.outputs.warning_message }}"
+          echo "⏳ Proceeding in 10 seconds..."
+          sleep 10
+
+      - name: Pre-execution Checks
+        run: |
+          echo "🔍 Pre-execution environment check..."
+          
+          # AWS認証確認
+          aws sts get-caller-identity
+          
+          # ディレクトリ存在確認
+          case "${{ github.event.inputs.execution_level }}" in
+            "segment"|"module")
+              target_dir="terraform/segments/${{ github.event.inputs.segment }}/environments/${{ github.event.inputs.environment }}"
+              ;;
+            "terragrunt-segment")
+              target_dir="terraform/live/${{ github.event.inputs.environment }}/${{ github.event.inputs.segment }}"
+              ;;
+            "terragrunt-module")
+              module_path=$(echo "${{ github.event.inputs.module }}" | sed 's|__|/|g')
+              target_dir="terraform/live/${{ github.event.inputs.environment }}/${{ github.event.inputs.segment }}/${module_path}"
+              ;;
+          esac
+          
+          if [ ! -d "$target_dir" ]; then
+            echo "❌ Target directory does not exist: $target_dir"
+            exit 1
+          fi
+          
+          echo "✅ Target directory confirmed: $target_dir"
+
+      - name: Execute Command
+        id: execute
+        run: |
+          echo "🚀 Executing: make ${{ needs.validation.outputs.command }}"
+          echo "📍 Working directory: $(pwd)"
+          echo "⏰ Started at: $(date)"
+          
+          # タイムアウト設定（30分）
+          timeout 1800 make ${{ needs.validation.outputs.command }}
+
+      - name: Execution Summary
+        if: always()
+        run: |
+          echo "## 📊 Execution Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🎯 Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Action**: ${{ github.event.inputs.action }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Level**: ${{ github.event.inputs.execution_level }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Segment**: ${{ github.event.inputs.segment }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event.inputs.module }}" != "" ]; then
+            echo "- **Module**: ${{ github.event.inputs.module }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "- **Command**: \`make ${{ needs.validation.outputs.command }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.execute.outcome }}" = "success" ]; then
+            echo "### ✅ Result: Success" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ Result: Failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Please check the logs above for error details." >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.validation.outputs.warning_message }}" != "" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### ⚠️ Warning" >> $GITHUB_STEP_SUMMARY
+            echo "${{ needs.validation.outputs.warning_message }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  post-execution:
+    name: Post-execution Actions
+    runs-on: ubuntu-latest
+    needs: [validation, execute]
+    if: always() && needs.validation.outputs.validated == 'true'
+    steps:
+      - name: Notify Result
+        run: |
+          if [ "${{ needs.execute.result }}" = "success" ]; then
+            echo "✅ Execution completed successfully!"
+            echo "📋 Action: ${{ github.event.inputs.action }}"
+            echo "🎯 Target: ${{ github.event.inputs.segment }}/${{ github.event.inputs.environment }}"
+            if [ "${{ github.event.inputs.module }}" != "" ]; then
+              echo "📦 Module: ${{ github.event.inputs.module }}"
+            fi
+          else
+            echo "❌ Execution failed!"
+            echo "🔍 Check the execution logs for details"
+            echo "💡 Consider running at segment level if module-level execution failed"
+            exit 1
+          fi
