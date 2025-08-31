@@ -541,7 +541,7 @@ resource "aws_iam_openid_connect_provider" "github_actions_deploy" {
 
 ### GitHub Actions 用 OIDC 認証ロールの作成
 
-Terraform でOIDCプロバイダーをAWSに登録した後、GitHub ActionsからAWSに認証するためのIAMロールを作成します。
+TerraformでOIDCプロバイダーをAWSに登録した後、GitHub ActionsからAWSに認証するためのIAMロールを作成します。
 以下の例では、特定のリポジトリ・ブランチからのみAssumeRoleを許可し、ECRへDockerイメージをPushするためのポリシーをアタッチしています。
 セキュリティ上、ブランチ条件は必ず設定することを推奨します。
 

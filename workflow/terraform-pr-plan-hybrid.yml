@@ -1,4 +1,4 @@
-name: Terraform Plan (Basic)
+name: Terraform Plan (Hybrid)
 
 on:
   pull_request:
@@ -17,11 +17,51 @@ permissions:
   contents: read
   pull-requests: write
 
-# 環境とセグメントをgit diffから取得し変数に格納する
 jobs:
+  bootstrap-status:
+    name: Check Bootstrap Status
+    runs-on: ubuntu-latest
+    outputs:
+      bootstrap_ready: ${{ steps.check.outputs.bootstrap_ready }}
+      missing_secrets: ${{ steps.check.outputs.missing_secrets }}
+    steps:
+      - name: Check Bootstrap Status
+        id: check
+        run: |
+          # GitHub Secretsの存在確認
+          missing_secrets=""
+          bootstrap_ready="true"
+          
+          # 必要なSecretsをチェック
+          if [ -z "${{ secrets.AWS_ROLE_ARN_DEV }}" ]; then
+            missing_secrets="$missing_secrets AWS_ROLE_ARN_DEV"
+            bootstrap_ready="false"
+          fi
+          
+          if [ -z "${{ secrets.AWS_ROLE_ARN_PROD }}" ]; then
+            missing_secrets="$missing_secrets AWS_ROLE_ARN_PROD"
+            bootstrap_ready="false"
+          fi
+          
+          # local環境用（オプション）
+          if [ -z "${{ secrets.AWS_ROLE_ARN_LOCAL }}" ]; then
+            missing_secrets="$missing_secrets AWS_ROLE_ARN_LOCAL"
+          fi
+          
+          echo "bootstrap_ready=$bootstrap_ready" >> $GITHUB_OUTPUT
+          echo "missing_secrets=$missing_secrets" >> $GITHUB_OUTPUT
+          
+          if [ "$bootstrap_ready" = "true" ]; then
+            echo "✅ Bootstrap is ready - All Role ARNs found"
+          else
+            echo "❌ Bootstrap required - Missing secrets: $missing_secrets"
+          fi
+
   detect-changes:
     name: Detect Changed Environments
     runs-on: ubuntu-latest
+    needs: bootstrap-status
+    if: needs.bootstrap-status.outputs.bootstrap_ready == 'true'
     outputs:
       environments: ${{ steps.detect.outputs.environments }}
       segments: ${{ steps.detect.outputs.segments }}
@@ -37,7 +77,7 @@ jobs:
         run: |
           # 変更されたファイルを取得 ...三点リーダで既存コミットから最新コミットまでを比較する
           # grepでパターンマッチする為、^()などを-Eで拡張正規表現にしている || trueでterraform関連以外の変更コミットもエラーにしない
-          changed_files=$(git diff --name-only origin/main...HEAD | grep -E '^(terraform|bootstrap)/' || true)
+          changed_files=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '^(terraform|bootstrap)/' || true)
           
           # $changed_filesの存在チェックで、空だった場合の出力設定、要はterraform関連じゃない場合はhas_changesにfalseを入れる
           if [ -z "$changed_files" ]; then
@@ -62,22 +102,18 @@ jobs:
           # 例えば、入力がdev\nprod\nの場合、-Rだけでは"dev"と"prod"が別々に処理されますが、-Rsを組み合わせると、"dev\nprod\n"と一つの文字列になる
           # -c (compact output) jqの出力を改行なしのコンパクトな1行にします
           # 改行をsplitで区切り、末尾改行による空文字列を[:-1]で末尾から一つ前と指定して配列から除外する（例：["dev", "prod", ""] => ["dev", "prod"]）
-          
           environments=$(echo "$changed_files" | grep -oE 'environments/(local|dev|prod)' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
           echo "environments=$environments" >> $GITHUB_OUTPUT
           
           # セグメントを検出
           segments=$(echo "$changed_files" | grep -oE 'segments/(foundation|application|data_processing)' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
           echo "segments=$segments" >> $GITHUB_OUTPUT
-          
-          echo "Detected environments: $environments"
-          echo "Detected segments: $segments"
 
   terraform-plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
-    needs: detect-changes # detect-changesジョブが完了するまで待機する
-    if: needs.detect-changes.outputs.has_changes == 'true'
+    needs: [bootstrap-status, detect-changes] # bootstrap-status, detect-changesジョブが完了するまで待機する
+    if: needs.bootstrap-status.outputs.bootstrap_ready == 'true' && needs.detect-changes.outputs.has_changes == 'true'
     # plan実行時間の短縮ためstrategy matrixを設定しdev, prodを並列で実行する
     strategy:
       matrix:
@@ -90,30 +126,16 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', matrix.environment)] || secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ matrix.environment == 'dev' && secrets.AWS_ROLE_ARN_DEV ||
+  matrix.environment == 'prod' && secrets.AWS_ROLE_ARN_PROD ||
+  matrix.environment == 'local' && secrets.AWS_ROLE_ARN_LOCAL ||
+  secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
-
-      - name: Bootstrap Check
-        id: bootstrap-check
-        run: |
-          echo "Checking if bootstrap is required for ${{ matrix.environment }}..."
-          if [ ! -f "bootstrap/.terraform.lock.hcl" ] || [ ! -d "bootstrap/.terraform" ]; then
-            echo "needs_bootstrap=true" >> $GITHUB_OUTPUT
-          else
-            echo "needs_bootstrap=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Bootstrap Plan
-        if: steps.bootstrap-check.outputs.needs_bootstrap == 'true'
-        working-directory: ./bootstrap
-        run: |
-          terraform init
-          terraform plan -var="environment=${{ matrix.environment }}"
 
       - name: Terraform Plan (Standard)
         id: plan-standard
@@ -194,8 +216,8 @@ jobs:
   segment-plan:
     name: Segment Plan
     runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.has_changes == 'true' && needs.detect-changes.outputs.segments != '[]'
+    needs: [bootstrap-status, detect-changes]
+    if: needs.bootstrap-status.outputs.bootstrap_ready == 'true' && needs.detect-changes.outputs.has_changes == 'true' && needs.detect-changes.outputs.segments != '[]'
     strategy:
       matrix:
         segment: ${{ fromJson(needs.detect-changes.outputs.segments) }}
@@ -208,7 +230,8 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', matrix.environment)] || secrets.AWS_ROLE_ARN }}
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ matrix.environment == 'dev' && secrets.AWS_OIDC_ROLE_DEV ||
+  matrix.environment == 'prod' && secrets.AWS_OIDC_ROLE_PROD }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
@@ -284,36 +307,125 @@ jobs:
               });
             }
 
+  bootstrap-required:
+    name: Bootstrap Setup Required
+    runs-on: ubuntu-latest
+    needs: bootstrap-status
+    if: needs.bootstrap-status.outputs.bootstrap_ready == 'false'
+    steps:
+      - name: Bootstrap Instructions
+        run: |
+          echo "## ⚠️ Bootstrap Setup Required" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "OIDC authentication infrastructure needs to be configured." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Missing GitHub Secrets:" >> $GITHUB_STEP_SUMMARY
+          echo "${{ needs.bootstrap-status.outputs.missing_secrets }}" | tr ' ' '\n' | while read secret; do
+            if [ -n "$secret" ]; then
+              echo "- \`$secret\`" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🛠️ Setup Options:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Option 1: Manual Setup (Recommended)" >> $GITHUB_STEP_SUMMARY
+          echo "1. Run bootstrap locally with AWS CLI credentials" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo 'cd bootstrap' >> $GITHUB_STEP_SUMMARY
+          echo 'terraform init' >> $GITHUB_STEP_SUMMARY
+          echo 'terraform apply' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "2. Copy Role ARNs from output to GitHub Secrets" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Option 2: Workflow Setup (If AWS Access Keys Available)" >> $GITHUB_STEP_SUMMARY
+          echo "1. Add temporary \`AWS_ACCESS_KEY_ID\` and \`AWS_SECRET_ACCESS_KEY\` to secrets" >> $GITHUB_STEP_SUMMARY
+          echo "2. Run 'Bootstrap OIDC Setup' workflow manually" >> $GITHUB_STEP_SUMMARY
+          echo "3. Remove temporary credentials after OIDC setup completes" >> $GITHUB_STEP_SUMMARY
+
+      - name: Comment PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const missingSecrets = '${{ needs.bootstrap-status.outputs.missing_secrets }}';
+            const secretsList = missingSecrets.split(' ')
+              .filter(s => s.length > 0)
+              .map(s => `- \`${s}\``)
+              .join('\n');
+            
+            const body = `## ⚠️ Bootstrap Setup Required
+            
+            The OIDC authentication infrastructure needs to be configured before Terraform can run.
+            
+            ### Missing GitHub Secrets:
+            ${secretsList}
+            
+            ### 🛠️ Quick Setup:
+            
+            1. **Run bootstrap locally:**
+               \`\`\`bash
+               cd bootstrap
+               terraform init
+               terraform apply
+               \`\`\`
+            
+            2. **Add Role ARNs to GitHub Secrets:**
+               - Go to [Repository Settings > Secrets](https://github.com/${{ github.repository }}/settings/secrets/actions)
+               - Add the Role ARNs from terraform output
+            
+            3. **Re-run this workflow**
+            
+            ### 💡 Alternative:
+            Use the [Bootstrap OIDC Setup workflow](../../actions) if you have temporary AWS credentials available.
+            
+            ---
+            *This is a one-time setup per repository.*`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
   plan-summary:
     name: Plan Summary
     runs-on: ubuntu-latest
-    needs: [detect-changes, terraform-plan, segment-plan]
-    if: always() && needs.detect-changes.outputs.has_changes == 'true'
+    needs: [bootstrap-status, detect-changes, terraform-plan, segment-plan]
+    if: always() && (needs.terraform-plan.result != 'skipped' || needs.segment-plan.result != 'skipped' || needs.bootstrap-status.outputs.bootstrap_ready == 'false')
     steps:
       - name: Summary Comment
         uses: actions/github-script@v7
         with:
           script: |
+            const bootstrapReady = '${{ needs.bootstrap-status.outputs.bootstrap_ready }}' === 'true';
             const standardResult = '${{ needs.terraform-plan.result }}';
             const segmentResult = '${{ needs.segment-plan.result }}';
             
             let summary = `## 📊 Terraform Plan Summary\n\n`;
             
-            if (standardResult !== 'skipped') {
-              summary += `**Standard Configuration**: ${standardResult === 'success' ? '✅' : '❌'} ${standardResult}\n`;
-            }
-            
-            if (segmentResult !== 'skipped') {
-              summary += `**Segment Configuration**: ${segmentResult === 'success' ? '✅' : '❌'} ${segmentResult}\n`;
-            }
-            
-            summary += `\n### 🔍 Next Steps\n`;
-            
-            if (standardResult === 'success' || segmentResult === 'success') {
-              summary += `- ✅ Review the plan details above\n`;
-              summary += `- ✅ Merge this PR to apply changes\n`;
+            if (!bootstrapReady) {
+              summary += `**Bootstrap Status**: ❌ Setup Required\n`;
+              summary += `**Action Required**: Configure OIDC authentication\n\n`;
+              summary += `See the bootstrap instructions comment above.\n`;
             } else {
-              summary += `- ❌ Fix any plan errors before merging\n`;
+              summary += `**Bootstrap Status**: ✅ Ready\n\n`;
+              
+              if (standardResult !== 'skipped') {
+                summary += `**Standard Configuration**: ${standardResult === 'success' ? '✅' : '❌'} ${standardResult}\n`;
+              }
+              
+              if (segmentResult !== 'skipped') {
+                summary += `**Segment Configuration**: ${segmentResult === 'success' ? '✅' : '❌'} ${segmentResult}\n`;
+              }
+              
+              if (standardResult === 'success' || segmentResult === 'success') {
+                summary += `\n### 🔍 Next Steps\n`;
+                summary += `- ✅ Review the plan details above\n`;
+                summary += `- ✅ Merge this PR to apply changes\n`;
+              } else if (standardResult === 'failure' || segmentResult === 'failure') {
+                summary += `\n### 🔍 Next Steps\n`;
+                summary += `- ❌ Fix any plan errors before merging\n`;
+              }
             }
             
             summary += `\n---\n*Generated by GitHub Actions*`;
