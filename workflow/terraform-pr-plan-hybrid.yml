@@ -32,7 +32,7 @@ jobs:
           missing_secrets=""
           bootstrap_ready="true"
           
-          # 必要なSecretsをチェック
+          # 必要なSecretsをチェック(dev, prodは必須設定)
           if [ -z "${{ secrets.AWS_ROLE_ARN_DEV }}" ]; then
             missing_secrets="$missing_secrets AWS_ROLE_ARN_DEV"
             bootstrap_ready="false"
@@ -43,9 +43,9 @@ jobs:
             bootstrap_ready="false"
           fi
           
-          # local環境用（オプション）
+          # localのsecrets存在確認（local環境はオプション - 警告のみ）
           if [ -z "${{ secrets.AWS_ROLE_ARN_LOCAL }}" ]; then
-            missing_secrets="$missing_secrets AWS_ROLE_ARN_LOCAL"
+            echo "⚠️ Warning: AWS_ROLE_ARN_LOCAL not found (local environment will be skipped)"
           fi
           
           echo "bootstrap_ready=$bootstrap_ready" >> $GITHUB_OUTPUT
@@ -103,6 +103,15 @@ jobs:
           # -c (compact output) jqの出力を改行なしのコンパクトな1行にします
           # 改行をsplitで区切り、末尾改行による空文字列を[:-1]で末尾から一つ前と指定して配列から除外する（例：["dev", "prod", ""] => ["dev", "prod"]）
           environments=$(echo "$changed_files" | grep -oE 'environments/(local|dev|prod)' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
+
+          # localが含まれる場合、AWS_ROLE_ARN_LOCALの存在確認
+          if echo "$environments" | jq -e 'index("local")' >/dev/null 2>&1; then
+            if [ -z "${{ secrets.AWS_ROLE_ARN_LOCAL }}" ]; then
+              echo "⚠️ Warning: local environment detected but AWS_ROLE_ARN_LOCAL not configured - excluding local"
+              environments=$(echo "$environments" | jq -c 'map(select(. != "local"))')
+            fi
+          fi
+
           echo "environments=$environments" >> $GITHUB_OUTPUT
           
           # セグメントを検出
@@ -117,19 +126,36 @@ jobs:
     # plan実行時間の短縮ためstrategy matrixを設定しdev, prodを並列で実行する
     strategy:
       matrix:
-        environment: ${{ fromJson(needs.detect-changes.outputs.environments) }}
+        environment: fromJson(needs.detect-changes.outputs.environments)
       fail-fast: false # どちらかの環境が失敗しても継続
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Get Role ARN
+        id: get-role
+        run: |
+          case "${{ matrix.environment }}" in
+            dev)
+              echo "role=${{ secrets.AWS_ROLE_ARN_DEV }}" >> $GITHUB_OUTPUT
+              ;;
+            prod)
+              echo "role=${{ secrets.AWS_ROLE_ARN_PROD }}" >> $GITHUB_OUTPUT
+              ;;
+            local)
+              echo "role=${{ secrets.AWS_ROLE_ARN_LOCAL }}" >> $GITHUB_OUTPUT
+              ;;
+            *) # default設定
+              echo "❌ Unknown environment: ${{ matrix.environment }}"
+              exit 1
+              ;;
+          esac
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: ${{ matrix.environment == 'dev' && secrets.AWS_ROLE_ARN_DEV ||
-  matrix.environment == 'prod' && secrets.AWS_ROLE_ARN_PROD ||
-  matrix.environment == 'local' && secrets.AWS_ROLE_ARN_LOCAL ||
-  secrets.AWS_ROLE_ARN }}
+          # matrixで定義したrole変数を使用
+          role-to-assume: ${{ steps.get-role.outputs.role }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
@@ -227,11 +253,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Get Role ARN
+        id: get-role
+        run: |
+          case "${{ matrix.environment }}" in
+            dev)
+              echo "role=${{ secrets.AWS_ROLE_ARN_DEV }}" >> $GITHUB_OUTPUT
+              ;;
+            prod)
+              echo "role=${{ secrets.AWS_ROLE_ARN_PROD }}" >> $GITHUB_OUTPUT
+              ;;
+            local)
+              if [ -n "${{ secrets.AWS_ROLE_ARN_LOCAL }}" ]; then
+                echo "role=${{ secrets.AWS_ROLE_ARN_LOCAL }}" >> $GITHUB_OUTPUT
+              else
+                echo "❌ AWS_ROLE_ARN_LOCAL not configured"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "❌ Unknown environment: ${{ matrix.environment }}"
+              exit 1
+              ;;
+          esac
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ matrix.environment == 'dev' && secrets.AWS_OIDC_ROLE_DEV ||
-  matrix.environment == 'prod' && secrets.AWS_OIDC_ROLE_PROD }}
+          role-to-assume: ${{ steps.get-role.outputs.role }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
@@ -401,6 +450,26 @@ jobs:
             const standardResult = '${{ needs.terraform-plan.result }}';
             const segmentResult = '${{ needs.segment-plan.result }}';
             
+            // 安全なJSON解析
+            let environments = [];
+            let segments = [];
+            
+            try {
+              const envOutput = '${{ needs.detect-changes.outputs.environments || "[]" }}';
+              environments = typeof envOutput === 'string' ? JSON.parse(envOutput) : envOutput;
+            } catch (e) {
+              console.log('Failed to parse environments output:', e);
+              environments = [];
+            }
+            
+            try {
+              const segOutput = '${{ needs.detect-changes.outputs.segments || "[]" }}';
+              segments = typeof segOutput === 'string' ? JSON.parse(segOutput) : segOutput;
+            } catch (e) {
+              console.log('Failed to parse segments output:', e);
+              segments = [];
+            }
+            
             let summary = `## 📊 Terraform Plan Summary\n\n`;
             
             if (!bootstrapReady) {
@@ -408,7 +477,9 @@ jobs:
               summary += `**Action Required**: Configure OIDC authentication\n\n`;
               summary += `See the bootstrap instructions comment above.\n`;
             } else {
-              summary += `**Bootstrap Status**: ✅ Ready\n\n`;
+              summary += `**Bootstrap Status**: ✅ Ready\n`;
+              summary += `**Changed Environments**: ${environments.length > 0 ? environments.map(e => `\`${e}\``).join(', ') : 'None'}\n`;
+              summary += `**Changed Segments**: ${segments.length > 0 ? segments.map(s => `\`${s}\``).join(', ') : 'None'}\n\n`;
               
               if (standardResult !== 'skipped') {
                 summary += `**Standard Configuration**: ${standardResult === 'success' ? '✅' : '❌'} ${standardResult}\n`;
@@ -425,14 +496,35 @@ jobs:
               } else if (standardResult === 'failure' || segmentResult === 'failure') {
                 summary += `\n### 🔍 Next Steps\n`;
                 summary += `- ❌ Fix any plan errors before merging\n`;
+                summary += `- 🔍 Check workflow logs for detailed error information\n`;
               }
             }
             
-            summary += `\n---\n*Generated by GitHub Actions*`;
+            summary += `\n---\n*Generated by GitHub Actions • [View Workflow](${context.payload.repository.html_url}/actions/runs/${context.runId})*`;
             
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
+            // コメントの update-or-create
+            const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: summary
+              issue_number: context.issue.number,
             });
+            
+            const existingComment = comments.find(c =>
+              c.body.includes("## 📊 Terraform Plan Summary")
+            );
+            
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: summary
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: summary
+              });
+            }
