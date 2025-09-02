@@ -1,4 +1,4 @@
-name: Terraform Apply (Basic)
+name: Terraform Apply
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Target Environment'
+        description: '環境の選択'
         required: true
         default: 'dev'
         type: choice
@@ -18,7 +18,7 @@ on:
           - dev
           - prod
       configuration_type:
-        description: 'Configuration Type'
+        description: '環境単位かセグメント単位か選択'
         required: true
         default: 'standard'
         type: choice
@@ -26,7 +26,7 @@ on:
           - standard
           - segment
       segment:
-        description: 'Segment (if segment type selected)'
+        description: 'Segment (segment選択時)'
         required: false
         type: choice
         options:
@@ -34,7 +34,7 @@ on:
           - application
           - data_processing
       dry_run:
-        description: 'Dry run (plan only)'
+        description: 'Dry run (planまで実行)'
         required: false
         default: false
         type: boolean
@@ -49,10 +49,48 @@ permissions:
   issues: write
 
 jobs:
+  bootstrap-status:
+    name: Check Bootstrap Status
+    runs-on: ubuntu-latest
+    outputs:
+      bootstrap_ready: ${{ steps.check.outputs.bootstrap_ready }}
+      missing_secrets: ${{ steps.check.outputs.missing_secrets }}
+    steps:
+      - name: Check Bootstrap Status
+        id: check
+        run: |
+          # GitHub Secretsの存在確認
+          missing_secrets=""
+          bootstrap_ready="true"
+          
+          # 必要なSecretsをチェック(dev, prodは必須設定)
+          if [ -z "${{ secrets.AWS_ROLE_ARN_DEV }}" ]; then
+            missing_secrets="$missing_secrets AWS_ROLE_ARN_DEV"
+            bootstrap_ready="false"
+          fi
+          
+          if [ -z "${{ secrets.AWS_ROLE_ARN_PROD }}" ]; then
+            missing_secrets="$missing_secrets AWS_ROLE_ARN_PROD"
+            bootstrap_ready="false"
+          fi
+
+          # localのsecrets存在確認（local環境はオプション - 警告のみ）
+          if [ -z "${{ secrets.AWS_ROLE_ARN_LOCAL }}" ]; then
+            echo "⚠️ Warning: AWS_ROLE_ARN_LOCAL not found (local environment will be skipped)"
+          fi
+          
+          echo "bootstrap_ready=$bootstrap_ready" >> $GITHUB_OUTPUT
+          echo "missing_secrets=$missing_secrets" >> $GITHUB_OUTPUT
+          
+          if [ "$bootstrap_ready" = "true" ]; then
+            echo "✅ Bootstrap is ready - All Role ARNs found"
+          else
+            echo "❌ Bootstrap required - Missing secrets: $missing_secrets"
+          fi
+
   detect-changes:
     name: Detect Changes
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
     outputs:
       environments: ${{ steps.detect.outputs.environments }}
       segments: ${{ steps.detect.outputs.segments }}
@@ -78,8 +116,15 @@ jobs:
           fi
           
           # プッシュ時の変更検出
-          changed_files=$(git diff --name-only HEAD~1 HEAD | grep -E '^(terraform|bootstrap)/' || true)
+          # github.base_refはプルリクエスト時のみ利用可能で、pushイベントでは空になります
+          if [ "${{ github.event_name }}" = "push" ]; then
+            base="HEAD^"
+          else
+            base="origin/${{ github.base_ref }}"
+          fi
+          changed_files=$(git diff --name-only $base...HEAD | grep -E '^(terraform|bootstrap)/' || true)
           
+          # changed_filesが空だった場合
           if [ -z "$changed_files" ]; then
             echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "environments=[]" >> $GITHUB_OUTPUT
@@ -100,26 +145,53 @@ jobs:
   terraform-apply-standard:
     name: Apply Standard Configuration
     runs-on: ubuntu-latest
-    needs: detect-changes
+    needs: [bootstrap-status, detect-changes]
     if: |
+      needs.bootstrap-status.outputs.bootstrap_ready == 'true' &&
       needs.detect-changes.outputs.has_changes == 'true' && 
       (github.event.inputs.configuration_type == 'standard' || 
        (github.event_name == 'push' && needs.detect-changes.outputs.environments != '[]'))
     strategy:
       matrix:
-        environment: ${{ fromJson(needs.detect-changes.outputs.environments || github.event.inputs.environment && format('["{0}"]', github.event.inputs.environment) || '["dev"]') }}
+        environment: ${{ fromJson(
+          github.event_name == 'workflow_dispatch' 
+            ? format('["{0}"]', github.event.inputs.environment)
+            : needs.detect-changes.outputs.environments
+        ) }}
       fail-fast: false
     environment:
       name: ${{ matrix.environment }}
-      url: ${{ steps.outputs.outputs.environment_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Get Role ARN
+        id: get-role
+        run: |
+          case "${{ matrix.environment }}" in
+            dev)
+              echo "role=${{ secrets.AWS_ROLE_ARN_DEV }}" >> $GITHUB_OUTPUT
+              ;;
+            prod)
+              echo "role=${{ secrets.AWS_ROLE_ARN_PROD }}" >> $GITHUB_OUTPUT
+              ;;
+            local)
+              if [ -z "${{ secrets.AWS_ROLE_ARN_LOCAL }}" ]; then
+                echo "❌ AWS_ROLE_ARN_LOCAL is not set for local environment"
+                exit 1
+              fi
+              echo "role=${{ secrets.AWS_ROLE_ARN_LOCAL }}" >> $GITHUB_OUTPUT
+              ;;
+            *) # default設定
+              echo "❌ Unknown environment: ${{ matrix.environment }}"
+              exit 1
+              ;;
+          esac
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', matrix.environment)] || secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ steps.get-role.outputs.role }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
@@ -127,19 +199,6 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
-
-      - name: Bootstrap Apply
-        working-directory: ./bootstrap
-        run: |
-          echo "🚀 Applying bootstrap configuration for ${{ matrix.environment }}..."
-          terraform init
-          terraform plan -var="environment=${{ matrix.environment }}"
-          terraform apply -auto-approve -var="environment=${{ matrix.environment }}"
-
-      - name: Wait for Bootstrap
-        run: |
-          echo "⏳ Waiting for bootstrap resources to be ready..."
-          sleep 30
 
       - name: Terraform Init
         run: make ${{ matrix.environment }}-init
@@ -152,7 +211,7 @@ jobs:
 
       - name: Terraform Apply
         id: apply
-        if: github.event.inputs.dry_run != 'true'
+        if: ${{ (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true') }} # dry_runの設定
         run: |
           echo "🚀 Applying changes for ${{ matrix.environment }}..."
           make ${{ matrix.environment }}-apply
@@ -179,7 +238,7 @@ jobs:
         run: |
           if [ "${{ steps.apply.outcome }}" = "success" ]; then
             echo "✅ Apply completed successfully for ${{ matrix.environment }}"
-          elif [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             echo "📋 Dry run completed for ${{ matrix.environment }}"
           else
             echo "❌ Apply failed for ${{ matrix.environment }}"
@@ -189,26 +248,52 @@ jobs:
   terraform-apply-segments:
     name: Apply Segment Configuration
     runs-on: ubuntu-latest
-    needs: [detect-changes, terraform-apply-standard]
+    needs: [bootstrap-status, detect-changes]
     if: |
-      needs.detect-changes.outputs.has_changes == 'true' && 
-      needs.detect-changes.outputs.segments != '[]' &&
-      (github.event.inputs.configuration_type == 'segment' || github.event_name == 'push')
+      needs.bootstrap-status.outputs.bootstrap_ready == 'true' &&
+      (github.event.inputs.configuration_type == 'segment' ||
+      (github.event_name == 'push' && needs.detect-changes.outputs.segments != '[]'))
     strategy:
       matrix:
-        segment: ${{ fromJson(needs.detect-changes.outputs.segments || github.event.inputs.segment && format('["{0}"]', github.event.inputs.segment) || '[]') }}
-        environment: ${{ fromJson(needs.detect-changes.outputs.environments || github.event.inputs.environment && format('["{0}"]', github.event.inputs.environment) || '["dev"]') }}
+        environment: ${{ fromJson(
+          github.event_name == 'workflow_dispatch' 
+            ? format('["{0}"]', github.event.inputs.environment)
+            : needs.detect-changes.outputs.environments || '["dev"]'
+        ) }}
       fail-fast: false
     environment:
-      name: ${{ matrix.environment }}-${{ matrix.segment }}
+      name: ${{ matrix.environment }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Get Role ARN
+        id: get-role
+        run: |
+          case "${{ matrix.environment }}" in
+            dev)
+              echo "role=${{ secrets.AWS_ROLE_ARN_DEV }}" >> $GITHUB_OUTPUT
+              ;;
+            prod)
+              echo "role=${{ secrets.AWS_ROLE_ARN_PROD }}" >> $GITHUB_OUTPUT
+              ;;
+            local)
+              if [ -z "${{ secrets.AWS_ROLE_ARN_LOCAL }}" ]; then
+                echo "❌ AWS_ROLE_ARN_LOCAL is not set for local environment"
+                exit 1
+              fi
+              echo "role=${{ secrets.AWS_ROLE_ARN_LOCAL }}" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "❌ Unknown environment: ${{ matrix.environment }}"
+              exit 1
+              ;;
+          esac
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', matrix.environment)] || secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ steps.get-role.outputs.role }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
@@ -216,50 +301,53 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Segment Apply
-        id: apply-segment
+      - name: Apply Foundation
+        if: contains(needs.detect-changes.outputs.segments, 'foundation')
         run: |
-          echo "🚀 Applying segment: ${{ matrix.segment }} for environment: ${{ matrix.environment }}"
-          
-          # セグメントの依存関係を考慮した実行順序
-          case "${{ matrix.segment }}" in
-            "foundation")
-              echo "🏗️ Applying foundation segment..."
-              make seg-foundation-${{ matrix.environment }}-init
-              make seg-foundation-${{ matrix.environment }}-plan
-              if [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
-                make seg-foundation-${{ matrix.environment }}-apply
-              fi
-              ;;
-            "application")
-              echo "📱 Applying application segment..."
-              make seg-application-${{ matrix.environment }}-init
-              make seg-application-${{ matrix.environment }}-plan
-              if [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
-                make seg-application-${{ matrix.environment }}-apply
-              fi
-              ;;
-            "data_processing")
-              echo "📊 Applying data processing segment..."
-              make seg-data_processing-${{ matrix.environment }}-init
-              make seg-data_processing-${{ matrix.environment }}-plan
-              if [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
-                make seg-data_processing-${{ matrix.environment }}-apply
-              fi
-              ;;
-          esac
+          make seg-foundation-${{ matrix.environment }}-init
+          make seg-foundation-${{ matrix.environment }}-plan
+          if [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
+            make seg-foundation-${{ matrix.environment }}-apply
+          fi
+
+      - name: Apply Application
+        if: contains(needs.detect-changes.outputs.segments, 'application')
+        run: |
+          make seg-application-${{ matrix.environment }}-init
+          make seg-application-${{ matrix.environment }}-plan
+          if [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
+            make seg-application-${{ matrix.environment }}-apply
+          fi
+
+      - name: Apply Data Processing
+        if: contains(needs.detect-changes.outputs.segments, 'data_processing')
+        run: |
+          make seg-data_processing-${{ matrix.environment }}-init
+          make seg-data_processing-${{ matrix.environment }}-plan
+          if [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
+            make seg-data_processing-${{ matrix.environment }}-apply
+          fi
 
       - name: Segment Status
         if: always()
         run: |
-          if [ "${{ steps.apply-segment.outcome }}" = "success" ]; then
-            echo "✅ Segment ${{ matrix.segment }} applied successfully for ${{ matrix.environment }}"
-          elif [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            echo "📋 Segment ${{ matrix.segment }} dry run completed for ${{ matrix.environment }}"
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "📋 Segment dry run completed for ${{ matrix.environment }}"
           else
-            echo "❌ Segment ${{ matrix.segment }} apply failed for ${{ matrix.environment }}"
-            exit 1
+            echo "✅ Segment apply finished for ${{ matrix.environment }}"
           fi
+
+  bootstrap-required:
+    name: Bootstrap Setup Required
+    runs-on: ubuntu-latest
+    needs: bootstrap-status
+    if: needs.bootstrap-status.outputs.bootstrap_ready == 'false'
+    steps:
+      - name: Bootstrap Instructions
+        run: |
+          echo "## ⚠️ Bootstrap Setup Required" >> $GITHUB_STEP_SUMMARY
+          echo "Missing GitHub Secrets: ${{ needs.bootstrap-status.outputs.missing_secrets }}" >> $GITHUB_STEP_SUMMARY
+          echo "Please run bootstrap setup before applying changes." >> $GITHUB_STEP_SUMMARY
 
   deploy-summary:
     name: Deployment Summary
