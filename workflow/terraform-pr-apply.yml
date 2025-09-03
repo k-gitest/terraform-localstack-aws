@@ -44,14 +44,15 @@ env:
   AWS_REGION: "ap-northeast-1"
 
 permissions:
-  id-token: write
-  contents: read
-  issues: write
+  id-token: write # OIDCトークンを発行できる（AWS AssumeRole に必須）
+  contents: read # コードのcheckoutに必要
+  issues: write # ワークフローからissue/commentを書き込む場合に必要
 
 jobs:
   bootstrap-status:
     name: Check Bootstrap Status
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       bootstrap_ready: ${{ steps.check.outputs.bootstrap_ready }}
       missing_secrets: ${{ steps.check.outputs.missing_secrets }}
@@ -91,6 +92,7 @@ jobs:
   detect-changes:
     name: Detect Changes
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       environments: ${{ steps.detect.outputs.environments }}
       segments: ${{ steps.detect.outputs.segments }}
@@ -118,7 +120,11 @@ jobs:
           # プッシュ時の変更検出
           # github.base_refはプルリクエスト時のみ利用可能で、pushイベントでは空になります
           if [ "${{ github.event_name }}" = "push" ]; then
-            base="HEAD^"
+            base="${{ github.event.before }}" # プッシュ操作が行われる直前のコミットのSHAハッシュ
+            if [ "$base" = "0000000000000000000000000000000000000000" ]; then
+              # 新ブランチなら main/develop の共通祖先を基準にする
+              base=$(git merge-base origin/main HEAD || echo "HEAD~10")
+            fi
           else
             base="origin/${{ github.base_ref }}"
           fi
@@ -145,6 +151,7 @@ jobs:
   terraform-apply-standard:
     name: Apply Standard Configuration
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [bootstrap-status, detect-changes]
     if: |
       needs.bootstrap-status.outputs.bootstrap_ready == 'true' &&
@@ -159,6 +166,7 @@ jobs:
             : needs.detect-changes.outputs.environments
         ) }}
       fail-fast: false
+      max-parallel: 2
     environment:
       name: ${{ matrix.environment }}
     steps:
@@ -211,6 +219,7 @@ jobs:
 
       - name: Terraform Apply
         id: apply
+        # push時は必ずapplyで統一、手動実行ではdry_runを参照
         if: ${{ (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true') }} # dry_runの設定
         run: |
           echo "🚀 Applying changes for ${{ matrix.environment }}..."
@@ -245,12 +254,37 @@ jobs:
             exit 1
           fi
 
+      - name: Show Terraform Error
+        if: failure()
+        run: |
+          echo "## ❌ Terraform Apply Failed" >> $GITHUB_STEP_SUMMARY
+          echo "Environment: ${{ matrix.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "Check the job logs for details" >> $GITHUB_STEP_SUMMARY
+
+      - name: Send Error to Monitoring
+        if: failure()
+        run: |
+          TIMESTAMP=$(date +%s000)
+          MESSAGE="❌ Terraform Apply Failed
+          Environment: ${{ matrix.environment }}
+          Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Commit: ${{ github.sha }}
+          Triggered by: ${{ github.actor }}"
+          aws logs create-log-group --log-group-name "terraform-errors" || true
+          aws logs create-log-stream --log-group-name "terraform-errors" --log-stream-name "${{ github.run_id }}" || true
+          aws logs put-log-events \
+            --log-group-name "terraform-errors" \
+            --log-stream-name "${{ github.run_id }}" \
+            --log-events "[{\"timestamp\":$TIMESTAMP,\"message\":\"$MESSAGE\"}]"
+
   terraform-apply-segments:
     name: Apply Segment Configuration
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [bootstrap-status, detect-changes]
     if: |
       needs.bootstrap-status.outputs.bootstrap_ready == 'true' &&
+      needs.detect-changes.outputs.has_changes == 'true' &&
       (github.event.inputs.configuration_type == 'segment' ||
       (github.event_name == 'push' && needs.detect-changes.outputs.segments != '[]'))
     strategy:
@@ -261,6 +295,7 @@ jobs:
             : needs.detect-changes.outputs.environments || '["dev"]'
         ) }}
       fail-fast: false
+      max-parallel: 2
     environment:
       name: ${{ matrix.environment }}
     steps:
@@ -301,45 +336,75 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Apply Foundation
-        if: contains(needs.detect-changes.outputs.segments, 'foundation')
-        run: |
-          make seg-foundation-${{ matrix.environment }}-init
-          make seg-foundation-${{ matrix.environment }}-plan
-          if [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
-            make seg-foundation-${{ matrix.environment }}-apply
-          fi
+      # push時は必ずapplyで統一、手動実行ではdry_runを参照
+      # foundation segment
+      - name: Plan Foundation
+        if: contains(fromJson(needs.detect-changes.outputs.segments), 'foundation')
+        run: |
+          make seg-foundation-${{ matrix.environment }}-init
+          make seg-foundation-${{ matrix.environment }}-plan
 
-      - name: Apply Application
-        if: contains(needs.detect-changes.outputs.segments, 'application')
+      - name: Apply Foundation
+        if: contains(fromJson(needs.detect-changes.outputs.segments), 'foundation') && (github.event_name == 'push' || github.event.inputs.dry_run != 'true')
+        run: |
+          make seg-foundation-${{ matrix.environment }}-apply
+
+      # application segment
+      - name: plan Application
+        if: contains(fromJson(needs.detect-changes.outputs.segments), 'application')
         run: |
           make seg-application-${{ matrix.environment }}-init
           make seg-application-${{ matrix.environment }}-plan
-          if [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
-            make seg-application-${{ matrix.environment }}-apply
-          fi
 
-      - name: Apply Data Processing
-        if: contains(needs.detect-changes.outputs.segments, 'data_processing')
+      - name: Apply Application
+        if: contains(fromJson(needs.detect-changes.outputs.segments), 'application') && (github.event_name == 'push' || github.event.inputs.dry_run != 'true') 
+        run: |
+          make seg-application-${{ matrix.environment }}-apply
+
+      # data processing segment
+      - name: plan Data Processing
+        if: contains(fromJson(needs.detect-changes.outputs.segments), 'data_processing')
         run: |
           make seg-data_processing-${{ matrix.environment }}-init
           make seg-data_processing-${{ matrix.environment }}-plan
-          if [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
-            make seg-data_processing-${{ matrix.environment }}-apply
-          fi
+
+      - name: Apply Data Processing
+        if: contains(fromJson(needs.detect-changes.outputs.segments), 'data_processing') && (github.event_name == 'push' || github.event.inputs.dry_run != 'true') 
+        run: |
+          make seg-data_processing-${{ matrix.environment }}-apply
 
       - name: Segment Status
         if: always()
         run: |
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             echo "📋 Segment dry run completed for ${{ matrix.environment }}"
           else
             echo "✅ Segment apply finished for ${{ matrix.environment }}"
           fi
 
+      - name: Show Terraform Error
+        if: failure()
+        run: |
+          echo "## ❌ Terraform Apply Failed" >> $GITHUB_STEP_SUMMARY
+          echo "Environment: ${{ matrix.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "Check the job logs for details" >> $GITHUB_STEP_SUMMARY
+
+      - name: Send Error to Monitoring
+        if: failure()
+        run: |
+          TIMESTAMP=$(date +%s000)
+          MESSAGE="Terraform Apply Failed in environment: ${{ matrix.environment }} (Run: ${{ github.run_id }})"
+          aws logs create-log-group --log-group-name "terraform-errors" || true
+          aws logs create-log-stream --log-group-name "terraform-errors" --log-stream-name "${{ github.run_id }}" || true
+          aws logs put-log-events \
+            --log-group-name "terraform-errors" \
+            --log-stream-name "${{ github.run_id }}" \
+            --log-events "[{\"timestamp\":$TIMESTAMP,\"message\":\"$MESSAGE\"}]"
+
   bootstrap-required:
     name: Bootstrap Setup Required
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: bootstrap-status
     if: needs.bootstrap-status.outputs.bootstrap_ready == 'false'
     steps:
@@ -352,6 +417,7 @@ jobs:
   deploy-summary:
     name: Deployment Summary
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [detect-changes, terraform-apply-standard, terraform-apply-segments]
     if: always() && needs.detect-changes.outputs.has_changes == 'true'
     steps:

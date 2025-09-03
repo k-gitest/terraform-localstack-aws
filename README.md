@@ -748,6 +748,38 @@ Makefileでコマンドを設定する事で効率的にterraformやterragrunt�
 **注意点**
 Makefileにはモジュール別用にターゲットとレシピを作成しているが、CI/CDでは基本的に環境別、セグメント別にapplyして依存関係の整合性を保守しているので、開発・デバッグや緊急用として手動で使用する。
 
+### 現状のワークフロー
+
+1. PR 作成/更新時
+- Terraform Plan (Hybrid) が走る
+  - → 差分のある環境・セグメントごとにPlan実行
+  - → PRにPlan結果をコメント、Summaryも集約
+
+2. PRマージ時 (push to main/develop)
+- Terraform Applyワークフローが走る
+  - → 今の設計では必ずApply
+
+3. 手動実行 (workflow_dispatch)
+- Terraform Applyワークフローを走らせ、dry_runを切り替えられる
+  - → Dry RunならPlan、そうでなければApply
+
+**注意点**
+1. prod環境もpushで自動Applyされる
+
+- 本番を扱う場合、誤マージ即反映は危険。
+
+**よくある代替：**
+- dev/staging は push自動apply
+- prod は必ず手動dispatch apply（承認フロー付き）
+
+2. Plan ⇔ Apply の差異リスク
+- PR Planとpush Applyの間にmainが進んだ場合、Plan内容と実際のApplyがズレる可能性がある
+- 一般的には「マージ直前に rebase/merge → Plan 最新化 → Apply」が望ましい
+
+3. dry_run の利用場面が限定的
+- 現在のdry_runは「workflow_dispatch 用ですが、Pushでは効かない
+  - → 今の運用フロー（PR で Plan 済み）なら実用上問題ないけど、「push でも Plan したい」ニーズが出てくるとコードの分岐が増える
+
 ## 注意点
 
 ### outputsはトップレベルで行う

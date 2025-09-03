@@ -21,6 +21,7 @@ jobs:
   bootstrap-status:
     name: Check Bootstrap Status
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       bootstrap_ready: ${{ steps.check.outputs.bootstrap_ready }}
       missing_secrets: ${{ steps.check.outputs.missing_secrets }}
@@ -60,6 +61,7 @@ jobs:
   detect-changes:
     name: Detect Changed Environments
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: bootstrap-status
     if: needs.bootstrap-status.outputs.bootstrap_ready == 'true'
     outputs:
@@ -121,6 +123,7 @@ jobs:
   terraform-plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [bootstrap-status, detect-changes] # bootstrap-status, detect-changesジョブが完了するまで待機する
     if: needs.bootstrap-status.outputs.bootstrap_ready == 'true' && needs.detect-changes.outputs.has_changes == 'true'
     # plan実行時間の短縮ためstrategy matrixを設定しdev, prodを並列で実行する
@@ -128,6 +131,8 @@ jobs:
       matrix:
         environment: fromJson(needs.detect-changes.outputs.environments)
       fail-fast: false # どちらかの環境が失敗しても継続
+    environment:
+      name: ${{ matrix.environment }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -246,6 +251,7 @@ jobs:
   segment-plan:
     name: Segment Plan
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [bootstrap-status, detect-changes]
     if: needs.bootstrap-status.outputs.bootstrap_ready == 'true' && needs.detect-changes.outputs.has_changes == 'true' && needs.detect-changes.outputs.segments != '[]'
     strategy:
@@ -253,6 +259,8 @@ jobs:
         segment: ${{ fromJson(needs.detect-changes.outputs.segments) }}
         environment: ${{ fromJson(needs.detect-changes.outputs.environments) }}
       fail-fast: false
+    environment:
+      name: ${{ matrix.environment }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -363,6 +371,7 @@ jobs:
   bootstrap-required: # Secrets（OIDC認証に必要なIAMロールのARN）が存在しない場合に実行
     name: Bootstrap Setup Required
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: bootstrap-status
     if: needs.bootstrap-status.outputs.bootstrap_ready == 'false'
     steps:
@@ -449,6 +458,7 @@ jobs:
   plan-summary:
     name: Plan Summary
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [bootstrap-status, detect-changes, terraform-plan, segment-plan] # 全てのジョブが終わるまで待機
     if: always() && (needs.terraform-plan.result != 'skipped' || needs.segment-plan.result != 'skipped' || needs.bootstrap-status.outputs.bootstrap_ready == 'false') # プランが実行されたか、またはブートストラップが必要な場合に実行
     steps:
