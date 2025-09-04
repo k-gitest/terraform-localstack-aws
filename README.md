@@ -596,6 +596,17 @@ resource "aws_iam_role_policy" "github_actions_ecr_policy" {
 
 ```
 
+### CI/CDワークフローの前にbootstrapを実行する
+
+1. 初期セットアップ
+cd bootstrap/
+terraform init
+terraform plan
+terraform apply
+
+2. 出力された情報をGitHubのシークレットに設定
+
+
 ## 環境ごとのプロバイダー設定とリソース作成の制御
 
 このプロジェクトでは、開発環境（LocalStack）と本番環境で異なるプロバイダー設定とリソースセットを使用するため、**Terraform実行コンテキストを環境ごとに分離する**設計を採用しています。

@@ -1,4 +1,4 @@
-name: Terraform Plan (Basic)
+name: Terraform Plan (Hybrid)
 
 on:
   pull_request:
@@ -15,13 +15,55 @@ env:
 permissions:
   id-token: write
   contents: read
-  pull-requests: write
+  pull-requests: write # planの結果をPRにコメントするために必要
 
-# 環境とセグメントをgit diffから取得し変数に格納する
 jobs:
+  bootstrap-status:
+    name: Check Bootstrap Status
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      bootstrap_ready: ${{ steps.check.outputs.bootstrap_ready }}
+      missing_secrets: ${{ steps.check.outputs.missing_secrets }}
+    steps:
+      - name: Check Bootstrap Status
+        id: check
+        run: |
+          # GitHub Secretsの存在確認
+          missing_secrets=""
+          bootstrap_ready="true"
+          
+          # 必要なSecretsをチェック(dev, prodは必須設定)
+          if [ -z "${{ secrets.AWS_ROLE_ARN_DEV }}" ]; then
+            missing_secrets="$missing_secrets AWS_ROLE_ARN_DEV"
+            bootstrap_ready="false"
+          fi
+          
+          if [ -z "${{ secrets.AWS_ROLE_ARN_PROD }}" ]; then
+            missing_secrets="$missing_secrets AWS_ROLE_ARN_PROD"
+            bootstrap_ready="false"
+          fi
+          
+          # localのsecrets存在確認（local環境はオプション - 警告のみ）
+          if [ -z "${{ secrets.AWS_ROLE_ARN_LOCAL }}" ]; then
+            echo "⚠️ Warning: AWS_ROLE_ARN_LOCAL not found (local environment will be skipped)"
+          fi
+          
+          echo "bootstrap_ready=$bootstrap_ready" >> $GITHUB_OUTPUT
+          echo "missing_secrets=$missing_secrets" >> $GITHUB_OUTPUT
+          
+          if [ "$bootstrap_ready" = "true" ]; then
+            echo "✅ Bootstrap is ready - All Role ARNs found"
+          else
+            echo "❌ Bootstrap required - Missing secrets: $missing_secrets"
+          fi
+
   detect-changes:
     name: Detect Changed Environments
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: bootstrap-status
+    if: needs.bootstrap-status.outputs.bootstrap_ready == 'true'
     outputs:
       environments: ${{ steps.detect.outputs.environments }}
       segments: ${{ steps.detect.outputs.segments }}
@@ -37,7 +79,7 @@ jobs:
         run: |
           # 変更されたファイルを取得 ...三点リーダで既存コミットから最新コミットまでを比較する
           # grepでパターンマッチする為、^()などを-Eで拡張正規表現にしている || trueでterraform関連以外の変更コミットもエラーにしない
-          changed_files=$(git diff --name-only origin/main...HEAD | grep -E '^(terraform|bootstrap)/' || true)
+          changed_files=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '^(terraform|bootstrap)/' || true)
           
           # $changed_filesの存在チェックで、空だった場合の出力設定、要はterraform関連じゃない場合はhas_changesにfalseを入れる
           if [ -z "$changed_files" ]; then
@@ -62,58 +104,76 @@ jobs:
           # 例えば、入力がdev\nprod\nの場合、-Rだけでは"dev"と"prod"が別々に処理されますが、-Rsを組み合わせると、"dev\nprod\n"と一つの文字列になる
           # -c (compact output) jqの出力を改行なしのコンパクトな1行にします
           # 改行をsplitで区切り、末尾改行による空文字列を[:-1]で末尾から一つ前と指定して配列から除外する（例：["dev", "prod", ""] => ["dev", "prod"]）
-          
           environments=$(echo "$changed_files" | grep -oE 'environments/(local|dev|prod)' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
+
+          # localが含まれる場合、AWS_ROLE_ARN_LOCALの存在確認
+          if echo "$environments" | jq -e 'index("local")' >/dev/null 2>&1; then
+            if [ -z "${{ secrets.AWS_ROLE_ARN_LOCAL }}" ]; then
+              echo "⚠️ Warning: local environment detected but AWS_ROLE_ARN_LOCAL not configured - excluding local"
+              environments=$(echo "$environments" | jq -c 'map(select(. != "local"))')
+            fi
+          fi
+
           echo "environments=$environments" >> $GITHUB_OUTPUT
           
           # セグメントを検出
           segments=$(echo "$changed_files" | grep -oE 'segments/(foundation|application|data_processing)' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
           echo "segments=$segments" >> $GITHUB_OUTPUT
-          
-          echo "Detected environments: $environments"
-          echo "Detected segments: $segments"
+
+          # Terragrunt
+          tg_environments=$(echo "$changed_files" | grep -oE 'live/(local|dev|prod)' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
+          tg_segments=$(echo "$changed_files" | grep -oE 'live/(local|dev|prod)/(foundation|application|data_processing)' | cut -d'/' -f3 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
+
+          echo "tg_environments=$tg_environments" >> $GITHUB_OUTPUT
+          echo "tg_segments=$tg_segments" >> $GITHUB_OUTPUT
 
   terraform-plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
-    needs: detect-changes # detect-changesジョブが完了するまで待機する
-    if: needs.detect-changes.outputs.has_changes == 'true'
+    timeout-minutes: 30
+    needs: [bootstrap-status, detect-changes] # bootstrap-status, detect-changesジョブが完了するまで待機する
+    if: needs.bootstrap-status.outputs.bootstrap_ready == 'true' && needs.detect-changes.outputs.has_changes == 'true'
     # plan実行時間の短縮ためstrategy matrixを設定しdev, prodを並列で実行する
     strategy:
       matrix:
-        environment: ${{ fromJson(needs.detect-changes.outputs.environments) }}
+        environment: fromJson(needs.detect-changes.outputs.environments)
       fail-fast: false # どちらかの環境が失敗しても継続
+    environment:
+      name: ${{ matrix.environment }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Get Role ARN # シークレットから環境ごとのroleを取得
+        id: get-role
+        run: |
+          case "${{ matrix.environment }}" in
+            dev)
+              echo "role=${{ secrets.AWS_ROLE_ARN_DEV }}" >> $GITHUB_OUTPUT
+              ;;
+            prod)
+              echo "role=${{ secrets.AWS_ROLE_ARN_PROD }}" >> $GITHUB_OUTPUT
+              ;;
+            local)
+              echo "role=${{ secrets.AWS_ROLE_ARN_LOCAL }}" >> $GITHUB_OUTPUT
+              ;;
+            *) # default設定
+              echo "❌ Unknown environment: ${{ matrix.environment }}"
+              exit 1
+              ;;
+          esac
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', matrix.environment)] || secrets.AWS_ROLE_ARN }}
+          # get roleのmatrixで定義したrole変数を使用
+          role-to-assume: ${{ steps.get-role.outputs.role }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
-
-      - name: Bootstrap Check
-        id: bootstrap-check
-        run: |
-          echo "Checking if bootstrap is required for ${{ matrix.environment }}..."
-          if [ ! -f "bootstrap/.terraform.lock.hcl" ] || [ ! -d "bootstrap/.terraform" ]; then
-            echo "needs_bootstrap=true" >> $GITHUB_OUTPUT
-          else
-            echo "needs_bootstrap=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Bootstrap Plan
-        if: steps.bootstrap-check.outputs.needs_bootstrap == 'true'
-        working-directory: ./bootstrap
-        run: |
-          terraform init
-          terraform plan -var="environment=${{ matrix.environment }}"
 
       - name: Terraform Plan (Standard)
         id: plan-standard
@@ -122,7 +182,7 @@ jobs:
           make ${{ matrix.environment }}-plan
         continue-on-error: true
 
-      - name: Format Plan Output
+      - name: Format Plan Output # outcomeでplanの実行結果を検証
         if: always()
         id: format
         run: |
@@ -133,15 +193,16 @@ jobs:
             echo "PLAN_STATUS=❌ Failed" >> $GITHUB_ENV
           fi
 
-      - name: Comment PR (Standard)
+      - name: Comment PR (Standard) # Terraformプランの実行結果をGitHubのプルリクエストにコメントとして投稿
         if: always()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v7 # コンテキストの取得
         with:
           script: |
             const environment = '${{ matrix.environment }}';
             const status = process.env.PLAN_STATUS;
             const outcome = '${{ steps.plan-standard.outcome }}';
             
+            // コメント本文の作成（markdown）
             const body = `
             ## 📋 Terraform Plan Results (Standard)
             
@@ -164,17 +225,20 @@ jobs:
             </details>
             `;
             
+            // 既存コメントの検索
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
             });
             
+            // 作成しようとしているコメントと同じ見出しと環境名を持つ既存のコメントがあるかを検索
             const existingComment = comments.find(comment => 
               comment.body.includes(`## 📋 Terraform Plan Results (Standard)`) &&
               comment.body.includes(`**Environment**: \`${environment}\``)
             );
             
+            // コメントの更新または新規作成
             if (existingComment) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
@@ -194,21 +258,48 @@ jobs:
   segment-plan:
     name: Segment Plan
     runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.has_changes == 'true' && needs.detect-changes.outputs.segments != '[]'
+    timeout-minutes: 30
+    needs: [bootstrap-status, detect-changes]
+    if: needs.bootstrap-status.outputs.bootstrap_ready == 'true' && needs.detect-changes.outputs.has_changes == 'true' && needs.detect-changes.outputs.segments != '[]'
     strategy:
       matrix:
         segment: ${{ fromJson(needs.detect-changes.outputs.segments) }}
         environment: ${{ fromJson(needs.detect-changes.outputs.environments) }}
       fail-fast: false
+    environment:
+      name: ${{ matrix.environment }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Get Role ARN
+        id: get-role
+        run: |
+          case "${{ matrix.environment }}" in
+            dev)
+              echo "role=${{ secrets.AWS_ROLE_ARN_DEV }}" >> $GITHUB_OUTPUT
+              ;;
+            prod)
+              echo "role=${{ secrets.AWS_ROLE_ARN_PROD }}" >> $GITHUB_OUTPUT
+              ;;
+            local)
+              if [ -n "${{ secrets.AWS_ROLE_ARN_LOCAL }}" ]; then
+                echo "role=${{ secrets.AWS_ROLE_ARN_LOCAL }}" >> $GITHUB_OUTPUT
+              else
+                echo "❌ AWS_ROLE_ARN_LOCAL not configured"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "❌ Unknown environment: ${{ matrix.environment }}"
+              exit 1
+              ;;
+          esac
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', matrix.environment)] || secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ steps.get-role.outputs.role }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
@@ -284,43 +375,208 @@ jobs:
               });
             }
 
+  terragrunt-plan:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.tg_environments != '[]'
+    strategy:
+      matrix:
+        environment: ${{ fromJson(needs.detect-changes.outputs.tg_environments) }}
+        segment: ${{ fromJson(needs.detect-changes.outputs.tg_segments) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Terragrunt Plan
+        run: make tg-${{ matrix.segment }}-${{ matrix.environment }}-plan
+
+  bootstrap-required: # Secrets（OIDC認証に必要なIAMロールのARN）が存在しない場合に実行
+    name: Bootstrap Setup Required
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: bootstrap-status
+    if: needs.bootstrap-status.outputs.bootstrap_ready == 'false'
+    steps:
+      - name: Bootstrap Instructions
+        run: |
+          # OIDC認証インフラストラクチャが未設定であることを警告
+          echo "## ⚠️ Bootstrap Setup Required" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "OIDC authentication infrastructure needs to be configured." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          # 存在しないGitHub Secretsの名前を出力
+          echo "### Missing GitHub Secrets:" >> $GITHUB_STEP_SUMMARY
+          echo "${{ needs.bootstrap-status.outputs.missing_secrets }}" | tr ' ' '\n' | while read secret; do
+            if [ -n "$secret" ]; then
+              echo "- \`$secret\`" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🛠️ Setup Options:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Option 1: Manual Setup (Recommended)" >> $GITHUB_STEP_SUMMARY
+          # ローカル環境でterraform applyを実行し、出力されたARNをGitHub Secretsに手動で追加する方法
+          echo "1. Run bootstrap locally with AWS CLI credentials" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo 'cd bootstrap' >> $GITHUB_STEP_SUMMARY
+          echo 'terraform init' >> $GITHUB_STEP_SUMMARY
+          echo 'terraform apply' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "2. Copy Role ARNs from output to GitHub Secrets" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Option 2: Workflow Setup (If AWS Access Keys Available)" >> $GITHUB_STEP_SUMMARY
+          # 一時的なAWSアクセスキーをSecretsに追加し、専用のワークフローを実行してセットアップを完了させる代替方法
+          echo "1. Add temporary \`AWS_ACCESS_KEY_ID\` and \`AWS_SECRET_ACCESS_KEY\` to secrets" >> $GITHUB_STEP_SUMMARY
+          echo "2. Run 'Bootstrap OIDC Setup' workflow manually" >> $GITHUB_STEP_SUMMARY
+          echo "3. Remove temporary credentials after OIDC setup completes" >> $GITHUB_STEP_SUMMARY
+
+      - name: Comment PR # セットアップ手順をプルリクエストに直接コメントとして投稿
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const missingSecrets = '${{ needs.bootstrap-status.outputs.missing_secrets }}';
+            // 渡されたmissing_secretsを空白で区切り空文字を除外しMarkdownのリストを追加する
+            const secretsList = missingSecrets.split(' ')
+              .filter(s => s.length > 0)
+              .map(s => `- \`${s}\``)
+              .join('\n');
+            
+            const body = `## ⚠️ Bootstrap Setup Required
+            
+            The OIDC authentication infrastructure needs to be configured before Terraform can run.
+            
+            ### Missing GitHub Secrets:
+            ${secretsList}
+            
+            ### 🛠️ Quick Setup:
+            
+            1. **Run bootstrap locally:**
+               \`\`\`bash
+               cd bootstrap
+               terraform init
+               terraform apply
+               \`\`\`
+            
+            2. **Add Role ARNs to GitHub Secrets:**
+               - Go to [Repository Settings > Secrets](https://github.com/${{ github.repository }}/settings/secrets/actions)
+               - Add the Role ARNs from terraform output
+            
+            3. **Re-run this workflow**
+            
+            ### 💡 Alternative:
+            Use the [Bootstrap OIDC Setup workflow](../../actions) if you have temporary AWS credentials available.
+            
+            ---
+            *This is a one-time setup per repository.*`;
+            
+            // GitHub APIを呼び出し、プルリクエストに新しいコメントを作成
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
   plan-summary:
     name: Plan Summary
     runs-on: ubuntu-latest
-    needs: [detect-changes, terraform-plan, segment-plan]
-    if: always() && needs.detect-changes.outputs.has_changes == 'true'
+    timeout-minutes: 10
+    needs: [bootstrap-status, detect-changes, terraform-plan, segment-plan] # 全てのジョブが終わるまで待機
+    if: always() && (needs.terraform-plan.result != 'skipped' || needs.segment-plan.result != 'skipped' || needs.bootstrap-status.outputs.bootstrap_ready == 'false') # プランが実行されたか、またはブートストラップが必要な場合に実行
     steps:
       - name: Summary Comment
         uses: actions/github-script@v7
         with:
           script: |
+            // 各先行ジョブの出力と結果を取得
+            const bootstrapReady = '${{ needs.bootstrap-status.outputs.bootstrap_ready }}' === 'true';
             const standardResult = '${{ needs.terraform-plan.result }}';
             const segmentResult = '${{ needs.segment-plan.result }}';
             
+            // 安全なJSON解析
+            let environments = [];
+            let segments = [];
+            
+            try {
+              const envOutput = '${{ needs.detect-changes.outputs.environments || "[]" }}';
+              environments = typeof envOutput === 'string' ? JSON.parse(envOutput) : envOutput;
+            } catch (e) {
+              console.log('Failed to parse environments output:', e);
+              environments = [];
+            }
+            
+            try {
+              const segOutput = '${{ needs.detect-changes.outputs.segments || "[]" }}';
+              segments = typeof segOutput === 'string' ? JSON.parse(segOutput) : segOutput;
+            } catch (e) {
+              console.log('Failed to parse segments output:', e);
+              segments = [];
+            }
+            
             let summary = `## 📊 Terraform Plan Summary\n\n`;
             
-            if (standardResult !== 'skipped') {
-              summary += `**Standard Configuration**: ${standardResult === 'success' ? '✅' : '❌'} ${standardResult}\n`;
-            }
-            
-            if (segmentResult !== 'skipped') {
-              summary += `**Segment Configuration**: ${segmentResult === 'success' ? '✅' : '❌'} ${segmentResult}\n`;
-            }
-            
-            summary += `\n### 🔍 Next Steps\n`;
-            
-            if (standardResult === 'success' || segmentResult === 'success') {
-              summary += `- ✅ Review the plan details above\n`;
-              summary += `- ✅ Merge this PR to apply changes\n`;
+            if (!bootstrapReady) {
+              // bootstrap_readyがfalseだった場合
+              summary += `**Bootstrap Status**: ❌ Setup Required\n`;
+              summary += `**Action Required**: Configure OIDC authentication\n\n`;
+              summary += `See the bootstrap instructions comment above.\n`;
             } else {
-              summary += `- ❌ Fix any plan errors before merging\n`;
+              summary += `**Bootstrap Status**: ✅ Ready\n`;
+              // 変更された環境とセグメント、および各プランの結果（成功または失敗）を簡潔に表示
+              summary += `**Changed Environments**: ${environments.length > 0 ? environments.map(e => `\`${e}\``).join(', ') : 'None'}\n`;
+              summary += `**Changed Segments**: ${segments.length > 0 ? segments.map(s => `\`${s}\``).join(', ') : 'None'}\n\n`;
+              
+              if (standardResult !== 'skipped') {
+                summary += `**Standard Configuration**: ${standardResult === 'success' ? '✅' : '❌'} ${standardResult}\n`;
+              }
+              
+              if (segmentResult !== 'skipped') {
+                summary += `**Segment Configuration**: ${segmentResult === 'success' ? '✅' : '❌'} ${segmentResult}\n`;
+              }
+              
+              // プラン結果に基づいて、次に取るべき行動を出力
+              if (standardResult === 'success' || segmentResult === 'success') {
+                summary += `\n### 🔍 Next Steps\n`;
+                summary += `- ✅ Review the plan details above\n`;
+                summary += `- ✅ Merge this PR to apply changes\n`;
+              } else if (standardResult === 'failure' || segmentResult === 'failure') {
+                summary += `\n### 🔍 Next Steps\n`;
+                summary += `- ❌ Fix any plan errors before merging\n`;
+                summary += `- 🔍 Check workflow logs for detailed error information\n`;
+              }
             }
             
-            summary += `\n---\n*Generated by GitHub Actions*`;
+            summary += `\n---\n*Generated by GitHub Actions • [View Workflow](${context.payload.repository.html_url}/actions/runs/${context.runId})*`;
             
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
+            // コメントの新規作成と更新
+            const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: summary
+              issue_number: context.issue.number,
             });
+            
+            // 既存のサマリーコメント検索
+            const existingComment = comments.find(c =>
+              c.body.includes("## 📊 Terraform Plan Summary")
+            );
+            
+            // サマリー新規作成と更新の分岐
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: summary
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: summary
+              });
+            }
