@@ -41,6 +41,7 @@ on:
 
 env:
   TF_VERSION: "1.5.0"
+  TG_VERSION: "0.86.2"
   AWS_REGION: "ap-northeast-1"
 
 permissions:
@@ -401,6 +402,121 @@ jobs:
             --log-stream-name "${{ github.run_id }}" \
             --log-events "[{\"timestamp\":$TIMESTAMP,\"message\":\"$MESSAGE\"}]"
 
+    terraform-apply-terragrunt:
+    name: Apply Terragrunt Configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [bootstrap-status, detect-changes]
+    if: |
+      needs.bootstrap-status.outputs.bootstrap_ready == 'true' &&
+      needs.detect-changes.outputs.has_changes == 'true' &&
+      (github.event.inputs.configuration_type == 'terragrunt' ||
+      (github.event_name == 'push' && needs.detect-changes.outputs.environments != '[]'))
+    strategy:
+      matrix:
+        environment: ${{ fromJson(
+          github.event_name == 'workflow_dispatch'
+            ? format('["{0}"]', github.event.inputs.environment)
+            : needs.detect-changes.outputs.environments
+        ) }}
+        segment: ${{ fromJson(
+          github.event_name == 'workflow_dispatch' && github.event.inputs.segment != ''
+            ? format('["{0}"]', github.event.inputs.segment)
+            : needs.detect-changes.outputs.segments != '[]' 
+              ? needs.detect-changes.outputs.segments
+              : '["foundation", "application", "data_processing"]'
+        ) }}
+      fail-fast: false
+      max-parallel: 2
+    environment:
+      name: ${{ matrix.environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get Role ARN
+        id: get-role
+        run: |
+          case "${{ matrix.environment }}" in
+            dev)   echo "role=${{ secrets.AWS_ROLE_ARN_DEV }}" >> $GITHUB_OUTPUT ;;
+            prod)  echo "role=${{ secrets.AWS_ROLE_ARN_PROD }}" >> $GITHUB_OUTPUT ;;
+            local)
+              if [ -z "${{ secrets.AWS_ROLE_ARN_LOCAL }}" ]; then
+                echo "❌ AWS_ROLE_ARN_LOCAL not set"
+                exit 1
+              fi
+              echo "role=${{ secrets.AWS_ROLE_ARN_LOCAL }}" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "❌ Unknown environment: ${{ matrix.environment }}"
+              exit 1
+              ;;
+          esac
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ steps.get-role.outputs.role }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Setup Terragrunt
+        run: |
+          TERRAGRUNT_VERSION=${{ env.TG_VERSION }}
+          wget -q -O terragrunt https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}/terragrunt_linux_amd64
+          chmod +x terragrunt
+          sudo mv terragrunt /usr/local/bin/
+
+      - name: Terragrunt Init & Plan
+        run: |
+          echo "📋 Running Terragrunt init and plan for ${{ matrix.segment }}/${{ matrix.environment }}..."
+          make tg-${{ matrix.segment }}-${{ matrix.environment }}-init-all
+          make tg-${{ matrix.segment }}-${{ matrix.environment }}-plan-all
+
+      - name: Terragrunt Apply
+        if: ${{ github.event_name == 'push' || github.event.inputs.dry_run != 'true' }}
+        run: |
+          echo "🚀 Applying Terragrunt changes for ${{ matrix.segment }}/${{ matrix.environment }}..."
+          make tg-${{ matrix.segment }}-${{ matrix.environment }}-apply-all
+
+      - name: Terragrunt Status
+        if: always()
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "📋 Terragrunt dry run completed for ${{ matrix.environment }}"
+          else
+            echo "✅ Terragrunt apply finished for ${{ matrix.environment }}"
+          fi
+
+      - name: Show Terraform Error
+        if: failure()
+        run: |
+          echo "## ❌ Terragrunt Apply Failed" >> $GITHUB_STEP_SUMMARY
+          echo "Segment: ${{ matrix.segment }}" >> $GITHUB_STEP_SUMMARY
+          echo "Environment: ${{ matrix.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "Check the job logs for details" >> $GITHUB_STEP_SUMMARY
+
+      - name: Send Error to Monitoring
+        if: failure()
+        run: |
+          TIMESTAMP=$(date +%s000)
+          MESSAGE="❌ Terragrunt Apply Failed
+          Segment: ${{ matrix.segment }}
+          Environment: ${{ matrix.environment }}
+          Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Commit: ${{ github.sha }}
+          Triggered by: ${{ github.actor }}"
+          aws logs create-log-group --log-group-name "terragrunt-errors" || true
+          aws logs create-log-stream --log-group-name "terragrunt-errors" --log-stream-name "${{ github.run_id }}-${{ matrix.segment }}-${{ matrix.environment }}" || true
+          aws logs put-log-events \
+            --log-group-name "terragrunt-errors" \
+            --log-stream-name "${{ github.run_id }}-${{ matrix.segment }}-${{ matrix.environment }}" \
+            --log-events "[{\"timestamp\":$TIMESTAMP,\"message\":\"$MESSAGE\"}]"
+
   bootstrap-required:
     name: Bootstrap Setup Required
     runs-on: ubuntu-latest
@@ -418,7 +534,7 @@ jobs:
     name: Deployment Summary
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [detect-changes, terraform-apply-standard, terraform-apply-segments]
+    needs: [detect-changes, terraform-apply-standard, terraform-apply-segments, terraform-apply-terragrunt]
     if: always() && needs.detect-changes.outputs.has_changes == 'true'
     steps:
       - name: Create Deployment Summary
@@ -429,6 +545,7 @@ jobs:
           echo "### 📊 Results" >> $GITHUB_STEP_SUMMARY
           echo "- **Standard Configuration**: ${{ needs.terraform-apply-standard.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Segment Configuration**: ${{ needs.terraform-apply-segments.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Terragrunt Configuration**: ${{ needs.terraform-apply-terragrunt.result }}" >> $GITHUB_STEP_SUMMARY
           
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🛠️ Configuration" >> $GITHUB_STEP_SUMMARY

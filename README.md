@@ -113,9 +113,11 @@ Terragruntを用いることで、Terraformの構成をDRY（Don't Repeat Yourse
 │   ├── locals-storage.tf       # S3・ストレージ関連
 │   ├── locals-database.tf      # RDS・Aurora関連
 │   └── locals-compute.tf       # ECS・Lambda・ALB関連
+├── cicd
+│   ├── actions      # composite
+│   └── workflows    # workflow
 ├── README.md
 ├── Makefile
-├── workflow
 └── .gitignore
 
 ```

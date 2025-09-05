@@ -10,6 +10,7 @@ on:
 
 env:
   TF_VERSION: "1.5.0"
+  TG_VERSION: "0.86.2"
   AWS_REGION: "ap-northeast-1"
 
 permissions:
@@ -376,23 +377,117 @@ jobs:
             }
 
   terragrunt-plan:
+    name: Terragrunt Plan
+    runs-on: ubuntu-latest
     needs: detect-changes
-    if: needs.detect-changes.outputs.tg_environments != '[]'
+    timeout-minutes: 30
+    needs: [bootstrap-status, detect-changes]
+    if: needs.bootstrap-status.outputs.bootstrap_ready == 'true' && needs.detect-changes.outputs.tg_environments != '[]'
     strategy:
       matrix:
         environment: ${{ fromJson(needs.detect-changes.outputs.tg_environments) }}
         segment: ${{ fromJson(needs.detect-changes.outputs.tg_segments) }}
-    runs-on: ubuntu-latest
+    environment:
+      name: ${{ matrix.environment }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Get Role ARN
+        id: get-role
+        run: |
+          case "${{ matrix.environment }}" in
+            dev)
+              echo "role=${{ secrets.AWS_ROLE_ARN_DEV }}" >> $GITHUB_OUTPUT ;;
+            prod)
+              echo "role=${{ secrets.AWS_ROLE_ARN_PROD }}" >> $GITHUB_OUTPUT ;;
+            local)
+              if [ -n "${{ secrets.AWS_ROLE_ARN_LOCAL }}" ]; then
+                echo "role=${{ secrets.AWS_ROLE_ARN_LOCAL }}" >> $GITHUB_OUTPUT
+              else
+                echo "❌ AWS_ROLE_ARN_LOCAL not configured"
+                exit 1
+              fi ;;
+            *)
+              echo "❌ Unknown environment: ${{ matrix.environment }}"
+              exit 1 ;;
+          esac
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ steps.get-role.outputs.role }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.5.0
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Setup Terragrunt
+        run: |
+          TERRAGRUNT_VERSION=${{ env.TG_VERSION }}
+          wget -q -O terragrunt https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}/terragrunt_linux_amd64
+          chmod +x terragrunt
+          sudo mv terragrunt /usr/local/bin/
 
       - name: Terragrunt Plan
-        run: make tg-${{ matrix.segment }}-${{ matrix.environment }}-plan
+        id: plan-terragrunt
+        run: |
+          echo "Running Terragrunt plan for: ${{ matrix.segment }}-${{ matrix.environment }}"
+          make tg-${{ matrix.segment }}-${{ matrix.environment }}-plan
+        continue-on-error: true
+
+      - name: Comment PR (Terragrunt)
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const segment = '${{ matrix.segment }}';
+            const environment = '${{ matrix.environment }}';
+            const outcome = '${{ steps.plan-terragrunt.outcome }}';
+            const status = outcome === 'success' ? '✅ Success' : '❌ Failed';
+
+            const body = `
+            ## 🌍 Terragrunt Plan Results
+
+            **Segment**: \`${segment}\`
+            **Environment**: \`${environment}\`
+            **Status**: ${status}
+            **Configuration**: \`terraform/live/${environment}/${segment}/\`
+
+            ${outcome === 'success' ?
+              '✅ Terragrunt plan completed successfully.' :
+              '❌ Terragrunt plan failed. Please check the logs.'
+            }
+            `;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existingComment = comments.find(comment =>
+              comment.body.includes("## 🌍 Terragrunt Plan Results") &&
+              comment.body.includes(`**Segment**: \`${segment}\``) &&
+              comment.body.includes(`**Environment**: \`${environment}\``)
+            );
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            }
 
   bootstrap-required: # Secrets（OIDC認証に必要なIAMロールのARN）が存在しない場合に実行
     name: Bootstrap Setup Required
@@ -485,7 +580,7 @@ jobs:
     name: Plan Summary
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [bootstrap-status, detect-changes, terraform-plan, segment-plan] # 全てのジョブが終わるまで待機
+    needs: [bootstrap-status, detect-changes, terraform-plan, segment-plan, , terragrunt-plan] # 全てのジョブが終わるまで待機
     if: always() && (needs.terraform-plan.result != 'skipped' || needs.segment-plan.result != 'skipped' || needs.bootstrap-status.outputs.bootstrap_ready == 'false') # プランが実行されたか、またはブートストラップが必要な場合に実行
     steps:
       - name: Summary Comment
@@ -496,6 +591,7 @@ jobs:
             const bootstrapReady = '${{ needs.bootstrap-status.outputs.bootstrap_ready }}' === 'true';
             const standardResult = '${{ needs.terraform-plan.result }}';
             const segmentResult = '${{ needs.segment-plan.result }}';
+            const terragruntResult = '${{ needs.terragrunt-plan.result }}';
             
             // 安全なJSON解析
             let environments = [];
@@ -537,13 +633,17 @@ jobs:
               if (segmentResult !== 'skipped') {
                 summary += `**Segment Configuration**: ${segmentResult === 'success' ? '✅' : '❌'} ${segmentResult}\n`;
               }
+
+              if (terragruntResult !== 'skipped') {
+                summary += `**Terragrunt Configuration**: ${terragruntResult === 'success' ? '✅' : '❌'} ${terragruntResult}\n`;
+              }
               
               // プラン結果に基づいて、次に取るべき行動を出力
-              if (standardResult === 'success' || segmentResult === 'success') {
+              if ([standardResult, segmentResult, terragruntResult].includes('success')) {
                 summary += `\n### 🔍 Next Steps\n`;
                 summary += `- ✅ Review the plan details above\n`;
                 summary += `- ✅ Merge this PR to apply changes\n`;
-              } else if (standardResult === 'failure' || segmentResult === 'failure') {
+              } else if ([standardResult, segmentResult, terragruntResult].includes('failure')) {
                 summary += `\n### 🔍 Next Steps\n`;
                 summary += `- ❌ Fix any plan errors before merging\n`;
                 summary += `- 🔍 Check workflow logs for detailed error information\n`;
