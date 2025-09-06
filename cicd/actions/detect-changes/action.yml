@@ -1,0 +1,152 @@
+name: 'Detect Terraform Changes'
+description: 'Detects changes in Terraform configurations'
+
+inputs:
+  workflow_type:
+    description: 'Workflow type (plan or apply)'
+    required: true
+    default: 'plan'
+  manual_environment:
+    description: 'Environment for workflow_dispatch'
+    required: false
+    default: ''
+  manual_segment:
+    description: 'Segment for workflow_dispatch'
+    required: false
+    default: ''
+  aws_role_arn_local:
+    description: 'AWS Role ARN for local environment'
+    required: false
+    default: ''
+
+outputs:
+  environments:
+    description: 'Detected environments'
+    value: ${{ steps.detect.outputs.environments }}
+  segments:
+    description: 'Detected segments'  
+    value: ${{ steps.detect.outputs.segments }}
+  has_changes:
+    description: 'Whether there are changes'
+    value: ${{ steps.detect.outputs.has_changes }}
+  tg_environments:
+    description: 'Detected Terragrunt environments'
+    value: ${{ steps.detect.outputs.tg_environments }}
+  tg_segments:
+    description: 'Detected Terragrunt segments'
+    value: ${{ steps.detect.outputs.tg_segments }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Detect Changes
+      id: detect
+      shell: bash
+      run: |
+        # GitHubコンテキストに直接アクセス（inputsに依存しない）
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+          
+          if [ -n "${{ inputs.manual_environment }}" ]; then
+            echo "environments=[\"${{ inputs.manual_environment }}\"]" >> $GITHUB_OUTPUT
+          else
+            echo "environments=[]" >> $GITHUB_OUTPUT
+          fi
+          
+          if [ -n "${{ inputs.manual_segment }}" ]; then
+            echo "segments=[\"${{ inputs.manual_segment }}\"]" >> $GITHUB_OUTPUT
+          else
+            echo "segments=[]" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "tg_environments=[]" >> $GITHUB_OUTPUT
+          echo "tg_segments=[]" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # Base reference determination using GitHub context directly
+        if [ "${{ inputs.workflow_type }}" = "plan" ]; then
+          if [ -n "${{ github.base_ref }}" ]; then
+            base="origin/${{ github.base_ref }}"
+          else
+            # 念のためのフォールバック
+            base="HEAD~1"
+          fi
+        elif [ "${{ github.event_name }}" = "push" ]; then
+          base="${{ github.event.before }}"
+          if [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            # 新規ブランチ時は main/develop の共通祖先を使う
+            base=$(git merge-base origin/main HEAD || git merge-base origin/develop HEAD || echo "HEAD~10")
+          fi
+        else
+          # dispatch は先に処理を終えているのでここに入らない想定
+          base="HEAD~1"
+        fi
+        
+        echo "Using base reference: $base"
+        
+        # Get changed files
+        changed_files=$(git diff --name-only $base...HEAD | grep -E '^(terraform|bootstrap)/' || true)
+        
+        if [ -z "$changed_files" ]; then
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+          echo "environments=[]" >> $GITHUB_OUTPUT
+          echo "segments=[]" >> $GITHUB_OUTPUT
+          echo "tg_environments=[]" >> $GITHUB_OUTPUT
+          echo "tg_segments=[]" >> $GITHUB_OUTPUT
+          echo "No Terraform-related changes detected"
+          exit 0
+        fi
+        
+        echo "has_changes=true" >> $GITHUB_OUTPUT
+        echo "Changed files detected:"
+        echo "$changed_files"
+        
+        # Environment detection
+        environments=$(echo "$changed_files" | \
+          grep -oE 'environments/(local|dev|prod)' | \
+          cut -d'/' -f2 | \
+          sort -u | \
+          jq -R -s -c 'split("\n")[:-1]' || echo '[]')
+        
+        # Handle local environment
+        if echo "$environments" | jq -e 'index("local")' >/dev/null 2>&1; then
+          if [ -z "${{ inputs.aws_role_arn_local }}" ]; then
+            echo "⚠️ Warning: local environment detected but AWS_ROLE_ARN_LOCAL not configured - excluding local"
+            environments=$(echo "$environments" | jq -c 'map(select(. != "local"))')
+          fi
+        fi
+        
+        echo "environments=$environments" >> $GITHUB_OUTPUT
+        
+        # Segment detection
+        segments=$(echo "$changed_files" | \
+          grep -oE 'segments/(foundation|application|data_processing)' | \
+          cut -d'/' -f2 | \
+          sort -u | \
+          jq -R -s -c 'split("\n")[:-1]' || echo '[]')
+        
+        echo "segments=$segments" >> $GITHUB_OUTPUT
+        
+        # Terragrunt detection
+        tg_environments=$(echo "$changed_files" | \
+          grep -oE 'live/(local|dev|prod)' | \
+          cut -d'/' -f2 | \
+          sort -u | \
+          jq -R -s -c 'split("\n")[:-1]' || echo '[]')
+          
+        tg_segments=$(echo "$changed_files" | \
+          grep -oE 'live/(local|dev|prod)/(foundation|application|data_processing)' | \
+          cut -d'/' -f3 | \
+          sort -u | \
+          jq -R -s -c 'split("\n")[:-1]' || echo '[]')
+        
+        echo "tg_environments=$tg_environments" >> $GITHUB_OUTPUT
+        echo "tg_segments=$tg_segments" >> $GITHUB_OUTPUT
+        
+        # Summary
+        echo "Detection completed:"
+        echo "  Environments: $(echo $environments | jq -r '. | join(", ")')"
+        echo "  Segments: $(echo $segments | jq -r '. | join(", ")')"
+        echo "  TG Environments: $(echo $tg_environments | jq -r '. | join(", ")')"
+        echo "  TG Segments: $(echo $tg_segments | jq -r '. | join(", ")')"

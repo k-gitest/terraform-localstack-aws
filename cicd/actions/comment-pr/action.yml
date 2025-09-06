@@ -1,0 +1,51 @@
+name: 'Comment PR'
+description: 'Creates or updates a PR comment with plan/apply results'
+inputs:
+  title:
+    description: 'Comment title'
+    required: true
+  body:
+    description: 'Comment body'
+    required: true
+  outcome:
+    description: 'Step outcome (success, failure, etc.)'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Comment PR
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const title = '${{ inputs.title }}';
+          const body = `${{ inputs.body }}`;
+          const outcome = '${{ inputs.outcome }}';
+          
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          
+          // ## 📋 Terraform Plan Results (Standard) という文字列を含むコメントを探す
+          // 見つかれば → 更新 見つからなければ → 新規作成
+          const existingComment = comments.find(c => c.body.includes(`## ${title}`));
+          const status = outcome === 'success' ? '✅ Success' : '❌ Failed';
+          const newBody = `## ${title}\n\n${body}\n\n**Status**: ${status}`;
+          
+          if (existingComment) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existingComment.id,
+              body: newBody,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: newBody,
+            });
+          }

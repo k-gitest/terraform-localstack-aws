@@ -1,0 +1,34 @@
+name: 'Configure AWS OIDC'
+description: 'Assumes an AWS IAM Role based on the environment and sets up credentials'
+inputs:
+  environment:
+    description: 'The target environment (dev, prod, local)'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Get Role ARN
+      id: get-role
+      shell: bash
+      run: |
+        case "${{ inputs.environment }}" in
+          dev)
+            echo "role=${{ secrets.AWS_ROLE_ARN_DEV }}" >> $GITHUB_OUTPUT
+            ;;
+          prod)
+            echo "role=${{ secrets.AWS_ROLE_ARN_PROD }}" >> $GITHUB_OUTPUT
+            ;;
+          local)
+            echo "role=${{ secrets.AWS_ROLE_ARN_LOCAL }}" >> $GITHUB_OUTPUT
+            ;;
+          *)
+            echo "❌ Unknown environment: ${{ inputs.environment }}"
+            exit 1
+            ;;
+        esac
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v3
+      with:
+        role-to-assume: ${{ steps.get-role.outputs.role }}
+        aws-region: ${{ env.AWS_REGION }}

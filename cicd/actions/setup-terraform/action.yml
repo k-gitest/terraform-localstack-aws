@@ -1,0 +1,35 @@
+name: 'Setup IaC Tools'
+description: 'Sets up Terraform and Terragrunt'
+inputs:
+  tf_version:
+    description: 'Terraform version'
+    required: true
+  tg_version:
+    description: 'Terragrunt version'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.tf_version }}
+
+    - name: Cache Terragrunt
+      id: cache-terragrunt
+      uses: actions/cache@v3
+      with:
+        path: /usr/local/bin/terragrunt
+        key: ${{ runner.os }}-terragrunt-${{ inputs.tg_version }}
+        
+    - name: Setup Terragrunt
+      if: steps.cache-terragrunt.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        TERRAGRUNT_VERSION=${{ inputs.tg_version }}
+        wget -q -O terragrunt https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}/terragrunt_linux_amd64
+        chmod +x terragrunt
+        sudo mv terragrunt /usr/local/bin/
+
+        # wget -q -O /usr/local/bin/terragrunt https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}/terragrunt_linux_amd64
+        # chmod +x /usr/local/bin/terragrunt
