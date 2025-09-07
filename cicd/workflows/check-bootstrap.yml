@@ -1,0 +1,57 @@
+# .github/workflows/check-bootstrap-status.yml
+name: Check Bootstrap Status
+
+on:
+  workflow_call:
+    secrets:
+      AWS_ROLE_ARN_DEV:
+        required: true
+      AWS_ROLE_ARN_PROD:
+        required: true
+      AWS_ROLE_ARN_LOCAL:
+        required: false
+    outputs:
+      bootstrap_ready:
+        description: 'Whether bootstrap is ready'
+        value: ${{ jobs.bootstrap-status.outputs.bootstrap_ready }}
+      missing_secrets:
+        description: 'Missing secrets list'
+        value: ${{ jobs.bootstrap-status.outputs.missing_secrets }}
+
+jobs:
+  bootstrap-status:
+    name: Check Bootstrap Status
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      bootstrap_ready: ${{ steps.check.outputs.bootstrap_ready }}
+      missing_secrets: ${{ steps.check.outputs.missing_secrets }}
+    steps:
+      - name: Check Bootstrap Status
+        id: check
+        run: |
+          missing_secrets=""
+          bootstrap_ready="true"
+          
+          if [ -z "${{ secrets.AWS_ROLE_ARN_DEV }}" ]; then
+            missing_secrets="$missing_secrets AWS_ROLE_ARN_DEV"
+            bootstrap_ready="false"
+          fi
+          
+          if [ -z "${{ secrets.AWS_ROLE_ARN_PROD }}" ]; then
+            missing_secrets="$missing_secrets AWS_ROLE_ARN_PROD"
+            bootstrap_ready="false"
+          fi
+          
+          if [ -z "${{ secrets.AWS_ROLE_ARN_LOCAL }}" ]; then
+            echo "⚠️ Warning: AWS_ROLE_ARN_LOCAL not found (local environment will be skipped)"
+          fi
+          
+          echo "bootstrap_ready=$bootstrap_ready" >> $GITHUB_OUTPUT
+          echo "missing_secrets=$missing_secrets" >> $GITHUB_OUTPUT
+          
+          if [ "$bootstrap_ready" = "true" ]; then
+            echo "✅ Bootstrap is ready - All Role ARNs found"
+          else
+            echo "❌ Bootstrap required - Missing secrets: $missing_secrets"
+          fi

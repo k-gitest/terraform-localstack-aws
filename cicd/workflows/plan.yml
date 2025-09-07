@@ -19,45 +19,12 @@ permissions:
   pull-requests: write # planの結果をPRにコメントするために必要
 
 jobs:
-  bootstrap-status:
-    name: Check Bootstrap Status
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      bootstrap_ready: ${{ steps.check.outputs.bootstrap_ready }}
-      missing_secrets: ${{ steps.check.outputs.missing_secrets }}
-    steps:
-      - name: Check Bootstrap Status
-        id: check
-        run: |
-          # GitHub Secretsの存在確認
-          missing_secrets=""
-          bootstrap_ready="true"
-          
-          # 必要なSecretsをチェック(dev, prodは必須設定)
-          if [ -z "${{ secrets.AWS_ROLE_ARN_DEV }}" ]; then
-            missing_secrets="$missing_secrets AWS_ROLE_ARN_DEV"
-            bootstrap_ready="false"
-          fi
-          
-          if [ -z "${{ secrets.AWS_ROLE_ARN_PROD }}" ]; then
-            missing_secrets="$missing_secrets AWS_ROLE_ARN_PROD"
-            bootstrap_ready="false"
-          fi
-          
-          # localのsecrets存在確認（local環境はオプション - 警告のみ）
-          if [ -z "${{ secrets.AWS_ROLE_ARN_LOCAL }}" ]; then
-            echo "⚠️ Warning: AWS_ROLE_ARN_LOCAL not found (local environment will be skipped)"
-          fi
-          
-          echo "bootstrap_ready=$bootstrap_ready" >> $GITHUB_OUTPUT
-          echo "missing_secrets=$missing_secrets" >> $GITHUB_OUTPUT
-          
-          if [ "$bootstrap_ready" = "true" ]; then
-            echo "✅ Bootstrap is ready - All Role ARNs found"
-          else
-            echo "❌ Bootstrap required - Missing secrets: $missing_secrets"
-          fi
+  check-bootstrap:
+    uses: ./.github/workflows/check-bootstrap.yml
+    secrets:
+      AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+      AWS_ROLE_ARN_PROD: ${{ secrets.AWS_ROLE_ARN_PROD }}
+      AWS_ROLE_ARN_LOCAL: ${{ secrets.AWS_ROLE_ARN_LOCAL }}
 
   detect-changes:
     name: Detect Changed Environments
@@ -83,61 +50,6 @@ jobs:
         with:
           workflow_type: 'plan'
           aws_role_arn_local: ${{ secrets.AWS_ROLE_ARN_LOCAL }}
-      
-      - name: Detect Changes
-        id: detect
-        run: |
-          # 変更されたファイルを取得 ...三点リーダで既存コミットから最新コミットまでを比較する
-          # grepでパターンマッチする為、^()などを-Eで拡張正規表現にしている || trueでterraform関連以外の変更コミットもエラーにしない
-          changed_files=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '^(terraform|bootstrap)/' || true)
-          
-          # $changed_filesの存在チェックで、空だった場合の出力設定、要はterraform関連じゃない場合はhas_changesにfalseを入れる
-          if [ -z "$changed_files" ]; then
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-            echo "environments=[]" >> $GITHUB_OUTPUT
-            echo "segments=[]" >> $GITHUB_OUTPUT
-            echo "tg_environments=[]" >> $GITHUB_OUTPUT
-            echo "tg_segments=[]" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          
-          # $changed_filesが空じゃない場合、has_changesにtrueを入れて出力する
-          echo "has_changes=true" >> $GITHUB_OUTPUT
-          echo "Changed files:"
-          echo "$changed_files"
-          
-          # 環境を検出
-          # grepで-o ( --only-matching の短縮形) を使用して環境文字だけ取得（例：environments/dev）
-          # cutで-dの区切り文字を/に指定し、-f2として2番目のフィールド文字列を取得（例：dev）
-          # sortして-u（unique）で重複を削除
-          # jq -R -s -c 'split("\n")[:-1]'で1行のJSON配列に変換　
-          # -R (raw input)　jqに与えられた入力を、JSONとしてパースするのではなく、単なる文字列として読み込ませます
-          # -s (slurp)　-Rで読み込んだ複数の文字列を、1つの配列にまとめてからjqフィルタに渡します
-          # 例えば、入力がdev\nprod\nの場合、-Rだけでは"dev"と"prod"が別々に処理されますが、-Rsを組み合わせると、"dev\nprod\n"と一つの文字列になる
-          # -c (compact output) jqの出力を改行なしのコンパクトな1行にします
-          # 改行をsplitで区切り、末尾改行による空文字列を[:-1]で末尾から一つ前と指定して配列から除外する（例：["dev", "prod", ""] => ["dev", "prod"]）
-          environments=$(echo "$changed_files" | grep -oE 'environments/(local|dev|prod)' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
-
-          # localが含まれる場合、AWS_ROLE_ARN_LOCALの存在確認
-          if echo "$environments" | jq -e 'index("local")' >/dev/null 2>&1; then
-            if [ -z "${{ secrets.AWS_ROLE_ARN_LOCAL }}" ]; then
-              echo "⚠️ Warning: local environment detected but AWS_ROLE_ARN_LOCAL not configured - excluding local"
-              environments=$(echo "$environments" | jq -c 'map(select(. != "local"))')
-            fi
-          fi
-
-          echo "environments=$environments" >> $GITHUB_OUTPUT
-          
-          # セグメントを検出
-          segments=$(echo "$changed_files" | grep -oE 'segments/(foundation|application|data_processing)' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
-          echo "segments=$segments" >> $GITHUB_OUTPUT
-
-          # Terragrunt
-          tg_environments=$(echo "$changed_files" | grep -oE 'live/(local|dev|prod)' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
-          tg_segments=$(echo "$changed_files" | grep -oE 'live/(local|dev|prod)/(foundation|application|data_processing)' | cut -d'/' -f3 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
-
-          echo "tg_environments=$tg_environments" >> $GITHUB_OUTPUT
-          echo "tg_segments=$tg_segments" >> $GITHUB_OUTPUT
 
   terraform-plan:
     name: Terraform Plan

@@ -50,45 +50,12 @@ permissions:
   issues: write # ワークフローからissue/commentを書き込む場合に必要
 
 jobs:
-  bootstrap-status:
-    name: Check Bootstrap Status
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      bootstrap_ready: ${{ steps.check.outputs.bootstrap_ready }}
-      missing_secrets: ${{ steps.check.outputs.missing_secrets }}
-    steps:
-      - name: Check Bootstrap Status
-        id: check
-        run: |
-          # GitHub Secretsの存在確認
-          missing_secrets=""
-          bootstrap_ready="true"
-          
-          # 必要なSecretsをチェック(dev, prodは必須設定)
-          if [ -z "${{ secrets.AWS_ROLE_ARN_DEV }}" ]; then
-            missing_secrets="$missing_secrets AWS_ROLE_ARN_DEV"
-            bootstrap_ready="false"
-          fi
-          
-          if [ -z "${{ secrets.AWS_ROLE_ARN_PROD }}" ]; then
-            missing_secrets="$missing_secrets AWS_ROLE_ARN_PROD"
-            bootstrap_ready="false"
-          fi
-
-          # localのsecrets存在確認（local環境はオプション - 警告のみ）
-          if [ -z "${{ secrets.AWS_ROLE_ARN_LOCAL }}" ]; then
-            echo "⚠️ Warning: AWS_ROLE_ARN_LOCAL not found (local environment will be skipped)"
-          fi
-          
-          echo "bootstrap_ready=$bootstrap_ready" >> $GITHUB_OUTPUT
-          echo "missing_secrets=$missing_secrets" >> $GITHUB_OUTPUT
-          
-          if [ "$bootstrap_ready" = "true" ]; then
-            echo "✅ Bootstrap is ready - All Role ARNs found"
-          else
-            echo "❌ Bootstrap required - Missing secrets: $missing_secrets"
-          fi
+  check-bootstrap:
+    uses: ./.github/workflows/check-bootstrap.yml
+    secrets:
+      AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
+      AWS_ROLE_ARN_PROD: ${{ secrets.AWS_ROLE_ARN_PROD }}
+      AWS_ROLE_ARN_LOCAL: ${{ secrets.AWS_ROLE_ARN_LOCAL }}
 
   detect-changes:
     name: Detect Changes
@@ -113,60 +80,6 @@ jobs:
           workflow_type: 'apply'
           manual_environment: ${{ github.event.inputs.environment }}
           manual_segment: ${{ github.event.inputs.segment }}
-
-      - name: Detect Changes
-        id: detect
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "has_changes=true" >> $GITHUB_OUTPUT
-            echo "environments=[\"${{ github.event.inputs.environment }}\"]" >> $GITHUB_OUTPUT
-            if [ "${{ github.event.inputs.segment }}" != "" ]; then
-              echo "segments=[\"${{ github.event.inputs.segment }}\"]" >> $GITHUB_OUTPUT
-            else
-              echo "segments=[]" >> $GITHUB_OUTPUT
-            fi
-            echo "tg_environments=[]" >> $GITHUB_OUTPUT
-            echo "tg_segments=[]" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          
-          # プッシュ時の変更検出
-          # github.base_refはプルリクエスト時のみ利用可能で、pushイベントでは空になります
-          if [ "${{ github.event_name }}" = "push" ]; then
-            base="${{ github.event.before }}" # プッシュ操作が行われる直前のコミットのSHAハッシュ
-            if [ "$base" = "0000000000000000000000000000000000000000" ]; then
-              # 新ブランチなら main/develop の共通祖先を基準にする
-              base=$(git merge-base origin/main HEAD || echo "HEAD~10")
-            fi
-          else
-            base="origin/${{ github.base_ref }}"
-          fi
-          changed_files=$(git diff --name-only $base...HEAD | grep -E '^(terraform|bootstrap)/' || true)
-          
-          # changed_filesが空だった場合
-          if [ -z "$changed_files" ]; then
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-            echo "environments=[]" >> $GITHUB_OUTPUT
-            echo "segments=[]" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          
-          echo "has_changes=true" >> $GITHUB_OUTPUT
-          
-          # 環境検出
-          environments=$(echo "$changed_files" | grep -oE 'environments/(local|dev|prod)' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
-          echo "environments=$environments" >> $GITHUB_OUTPUT
-          
-          # セグメント検出
-          segments=$(echo "$changed_files" | grep -oE 'segments/(foundation|application|data_processing)' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
-          echo "segments=$segments" >> $GITHUB_OUTPUT
-
-          # Terragrunt
-          tg_environments=$(echo "$changed_files" | grep -oE 'live/(local|dev|prod)' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
-          tg_segments=$(echo "$changed_files" | grep -oE 'live/(local|dev|prod)/(foundation|application|data_processing)' | cut -d'/' -f3 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
-
-          echo "tg_environments=$tg_environments" >> $GITHUB_OUTPUT
-          echo "tg_segments=$tg_segments" >> $GITHUB_OUTPUT
 
   terraform-apply-standard:
     name: Apply Standard Configuration

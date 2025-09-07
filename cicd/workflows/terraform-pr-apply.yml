@@ -98,6 +98,8 @@ jobs:
       environments: ${{ steps.detect.outputs.environments }}
       segments: ${{ steps.detect.outputs.segments }}
       has_changes: ${{ steps.detect.outputs.has_changes }}
+      tg_environments: ${{ steps.detect.outputs.tg_environments }}
+      tg_segments: ${{ steps.detect.outputs.tg_segments }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -115,6 +117,8 @@ jobs:
             else
               echo "segments=[]" >> $GITHUB_OUTPUT
             fi
+            echo "tg_environments=[]" >> $GITHUB_OUTPUT
+            echo "tg_segments=[]" >> $GITHUB_OUTPUT
             exit 0
           fi
           
@@ -136,6 +140,8 @@ jobs:
             echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "environments=[]" >> $GITHUB_OUTPUT
             echo "segments=[]" >> $GITHUB_OUTPUT
+            echo "tg_environments=[]" >> $GITHUB_OUTPUT
+            echo "tg_segments=[]" >> $GITHUB_OUTPUT
             exit 0
           fi
           
@@ -148,6 +154,13 @@ jobs:
           # セグメント検出
           segments=$(echo "$changed_files" | grep -oE 'segments/(foundation|application|data_processing)' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
           echo "segments=$segments" >> $GITHUB_OUTPUT
+
+          # Terragrunt
+          tg_environments=$(echo "$changed_files" | grep -oE 'live/(local|dev|prod)' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
+          tg_segments=$(echo "$changed_files" | grep -oE 'live/(local|dev|prod)/(foundation|application|data_processing)' | cut -d'/' -f3 | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo '[]')
+
+          echo "tg_environments=$tg_environments" >> $GITHUB_OUTPUT
+          echo "tg_segments=$tg_segments" >> $GITHUB_OUTPUT
 
   terraform-apply-standard:
     name: Apply Standard Configuration
@@ -402,7 +415,7 @@ jobs:
             --log-stream-name "${{ github.run_id }}" \
             --log-events "[{\"timestamp\":$TIMESTAMP,\"message\":\"$MESSAGE\"}]"
 
-    terraform-apply-terragrunt:
+  terraform-apply-terragrunt:
     name: Apply Terragrunt Configuration
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -411,19 +424,19 @@ jobs:
       needs.bootstrap-status.outputs.bootstrap_ready == 'true' &&
       needs.detect-changes.outputs.has_changes == 'true' &&
       (github.event.inputs.configuration_type == 'terragrunt' ||
-      (github.event_name == 'push' && needs.detect-changes.outputs.environments != '[]'))
+      (github.event_name == 'push' && needs.detect-changes.outputs.tg_environments != '[]'))
     strategy:
       matrix:
         environment: ${{ fromJson(
           github.event_name == 'workflow_dispatch'
             ? format('["{0}"]', github.event.inputs.environment)
-            : needs.detect-changes.outputs.environments
+            : needs.detect-changes.outputs.tg_environments
         ) }}
         segment: ${{ fromJson(
           github.event_name == 'workflow_dispatch' && github.event.inputs.segment != ''
             ? format('["{0}"]', github.event.inputs.segment)
-            : needs.detect-changes.outputs.segments != '[]' 
-              ? needs.detect-changes.outputs.segments
+            : needs.detect-changes.outputs.tg_segments != '[]' 
+              ? needs.detect-changes.outputs.tg_segments
               : '["foundation", "application", "data_processing"]'
         ) }}
       fail-fast: false
