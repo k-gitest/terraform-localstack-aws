@@ -1,0 +1,57 @@
+name: 'Handle Terraform Error'
+description: 'Common error handling for Terraform operations'
+inputs:
+  operation_type:
+    description: 'Operation type (plan/apply)'
+    required: true
+  environment:
+    description: 'Environment name'
+    required: true
+  segment:
+    description: 'Segment name (optional)'
+    required: false
+  configuration_type:
+    description: 'Configuration type (standard/segment/terragrunt)'
+    required: true
+    default: 'standard'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Show Terraform Error
+      if: failure()
+      shell: bash
+      run: |
+        echo "## ❌ Terraform ${{ inputs.operation_type }} Failed" >> $GITHUB_STEP_SUMMARY
+        echo "Configuration: ${{ inputs.configuration_type }}" >> $GITHUB_STEP_SUMMARY
+        echo "Environment: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+        if [ -n "${{ inputs.segment }}" ]; then
+          echo "Segment: ${{ inputs.segment }}" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "Check the job logs for details" >> $GITHUB_STEP_SUMMARY
+
+    - name: Send Error to Monitoring
+      if: failure()
+      shell: bash
+      run: |
+        TIMESTAMP=$(date +%s000)
+        LOG_GROUP="terraform-${{ inputs.configuration_type }}-errors"
+        STREAM_NAME="${{ github.run_id }}"
+        if [ -n "${{ inputs.segment }}" ]; then
+          STREAM_NAME="${STREAM_NAME}-${{ inputs.segment }}"
+        fi
+        STREAM_NAME="${STREAM_NAME}-${{ inputs.environment }}"
+        
+        MESSAGE="❌ ${{ inputs.configuration_type }} ${{ inputs.operation_type }} Failed
+        Environment: ${{ inputs.environment }}
+        $( [ -n "${{ inputs.segment }}" ] && echo "Segment: ${{ inputs.segment }}" )
+        Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        Commit: ${{ github.sha }}
+        Triggered by: ${{ github.actor }}"
+        
+        aws logs create-log-group --log-group-name "$LOG_GROUP" || true
+        aws logs create-log-stream --log-group-name "$LOG_GROUP" --log-stream-name "$STREAM_NAME" || true
+        aws logs put-log-events \
+          --log-group-name "$LOG_GROUP" \
+          --log-stream-name "$STREAM_NAME" \
+          --log-events "[{\"timestamp\":$TIMESTAMP,\"message\":\"$MESSAGE\"}]"

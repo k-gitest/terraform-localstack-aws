@@ -115,7 +115,15 @@ Terragruntを用いることで、Terraformの構成をDRY（Don't Repeat Yourse
 │   └── locals-compute.tf       # ECS・Lambda・ALB関連
 ├── cicd
 │   ├── actions      # composite
+│   │    ├── comment-pr   
+│   │    ├── detect-changes
+│   │    ├── get-role-aws
+│   │    ├── handle-terraform-error
+│   │    └── setup-terraform
 │   └── workflows    # workflow
+│        ├── apply.yml  # エントリー
+│        ├── check-bootstrap.yml
+│        └── plan.yml # エントリー
 ├── README.md
 ├── Makefile
 └── .gitignore

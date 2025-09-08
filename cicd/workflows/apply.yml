@@ -50,7 +50,7 @@ permissions:
   issues: write # ワークフローからissue/commentを書き込む場合に必要
 
 jobs:
-  check-bootstrap:
+  bootstrap-status:
     uses: ./.github/workflows/check-bootstrap.yml
     secrets:
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
@@ -163,28 +163,13 @@ jobs:
             exit 1
           fi
 
-      - name: Show Terraform Error
+      - name: Handle Errors
         if: failure()
-        run: |
-          echo "## ❌ Terraform Apply Failed" >> $GITHUB_STEP_SUMMARY
-          echo "Environment: ${{ matrix.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "Check the job logs for details" >> $GITHUB_STEP_SUMMARY
-
-      - name: Send Error to Monitoring
-        if: failure()
-        run: |
-          TIMESTAMP=$(date +%s000)
-          MESSAGE="❌ Terraform Apply Failed
-          Environment: ${{ matrix.environment }}
-          Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          Commit: ${{ github.sha }}
-          Triggered by: ${{ github.actor }}"
-          aws logs create-log-group --log-group-name "terraform-errors" || true
-          aws logs create-log-stream --log-group-name "terraform-errors" --log-stream-name "${{ github.run_id }}" || true
-          aws logs put-log-events \
-            --log-group-name "terraform-errors" \
-            --log-stream-name "${{ github.run_id }}" \
-            --log-events "[{\"timestamp\":$TIMESTAMP,\"message\":\"$MESSAGE\"}]"
+        uses: ./.github/actions/handle-terraform-error
+        with:
+          operation_type: 'apply'
+          environment: ${{ matrix.environment }}
+          configuration_type: 'standard'
 
   terraform-apply-segments:
     name: Apply Segment Configuration
@@ -268,24 +253,13 @@ jobs:
             echo "✅ Segment apply finished for ${{ matrix.environment }}"
           fi
 
-      - name: Show Terraform Error
+      - name: Handle Errors
         if: failure()
-        run: |
-          echo "## ❌ Terraform Apply Failed" >> $GITHUB_STEP_SUMMARY
-          echo "Environment: ${{ matrix.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "Check the job logs for details" >> $GITHUB_STEP_SUMMARY
-
-      - name: Send Error to Monitoring
-        if: failure()
-        run: |
-          TIMESTAMP=$(date +%s000)
-          MESSAGE="Terraform Apply Failed in environment: ${{ matrix.environment }} (Run: ${{ github.run_id }})"
-          aws logs create-log-group --log-group-name "terraform-errors" || true
-          aws logs create-log-stream --log-group-name "terraform-errors" --log-stream-name "${{ github.run_id }}" || true
-          aws logs put-log-events \
-            --log-group-name "terraform-errors" \
-            --log-stream-name "${{ github.run_id }}" \
-            --log-events "[{\"timestamp\":$TIMESTAMP,\"message\":\"$MESSAGE\"}]"
+        uses: ./.github/actions/handle-terraform-error
+        with:
+          operation_type: 'apply'
+          environment: ${{ matrix.environment }}
+          configuration_type: 'segment'
 
   terraform-apply-terragrunt:
     name: Apply Terragrunt Configuration
@@ -351,30 +325,14 @@ jobs:
             echo "✅ Terragrunt apply finished for ${{ matrix.environment }}"
           fi
 
-      - name: Show Terraform Error
+      - name: Handle Errors
         if: failure()
-        run: |
-          echo "## ❌ Terragrunt Apply Failed" >> $GITHUB_STEP_SUMMARY
-          echo "Segment: ${{ matrix.segment }}" >> $GITHUB_STEP_SUMMARY
-          echo "Environment: ${{ matrix.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "Check the job logs for details" >> $GITHUB_STEP_SUMMARY
-
-      - name: Send Error to Monitoring
-        if: failure()
-        run: |
-          TIMESTAMP=$(date +%s000)
-          MESSAGE="❌ Terragrunt Apply Failed
-          Segment: ${{ matrix.segment }}
-          Environment: ${{ matrix.environment }}
-          Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          Commit: ${{ github.sha }}
-          Triggered by: ${{ github.actor }}"
-          aws logs create-log-group --log-group-name "terragrunt-errors" || true
-          aws logs create-log-stream --log-group-name "terragrunt-errors" --log-stream-name "${{ github.run_id }}-${{ matrix.segment }}-${{ matrix.environment }}" || true
-          aws logs put-log-events \
-            --log-group-name "terragrunt-errors" \
-            --log-stream-name "${{ github.run_id }}-${{ matrix.segment }}-${{ matrix.environment }}" \
-            --log-events "[{\"timestamp\":$TIMESTAMP,\"message\":\"$MESSAGE\"}]"
+        uses: ./.github/actions/handle-terraform-error
+        with:
+          operation_type: 'apply'
+          environment: ${{ matrix.environment }}
+          segment: ${{ matrix.segment }}
+          configuration_type: 'terragrunt'
 
   bootstrap-required:
     name: Bootstrap Setup Required

@@ -19,7 +19,7 @@ permissions:
   pull-requests: write # planの結果をPRにコメントするために必要
 
 jobs:
-  check-bootstrap:
+  bootstrap-status:
     uses: ./.github/workflows/check-bootstrap.yml
     secrets:
       AWS_ROLE_ARN_DEV: ${{ secrets.AWS_ROLE_ARN_DEV }}
