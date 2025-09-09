@@ -122,8 +122,9 @@ Terragruntを用いることで、Terraformの構成をDRY（Don't Repeat Yourse
 │   │    └── setup-terraform
 │   └── workflows    # workflow
 │        ├── apply.yml  # エントリー
+│        ├── plan.yml # エントリー
 │        ├── check-bootstrap.yml
-│        └── plan.yml # エントリー
+│        └── ecs-deploy.yml # ECR更新通知エントリー
 ├── README.md
 ├── Makefile
 └── .gitignore
@@ -616,6 +617,109 @@ terraform apply
 
 2. 出力された情報をGitHubのシークレットに設定
 
+### アプリケーションリポジトリでの更新通知を受け取る
+ECR/ECSで運用しているアプリケーション開発を行っているリポジトリでDockerイメージやコンポーズの変更があった場合、CI/CDでIaC側に通知を送りECSを更新する必要があります。
+
+**流れ**
+1. アプリケーションリポジトリでCI/CD実施
+2. ビルドからDockerイメージ作成しECRにpush
+3. そのImageタグをIaCリポジトリに渡し更新を通知する
+4. IaC側は受け取ったImageタグをapplyし、ECSリソースのタスクを最新に更新する
+
+```mermaid
+sequenceDiagram
+    participant App as アプリケーションリポジトリ
+    participant ECR as Amazon ECR
+    participant IaC as IaCリポジトリ
+    participant ECS as Amazon ECS
+
+    Note over App: 1. CI/CD実施
+    App->>App: コードプッシュ・ワークフロー開始
+    App->>App: Dockerイメージビルド
+    
+    Note over App,ECR: 2. ECRにpush
+    App->>ECR: docker push (image:tag)
+    ECR-->>App: プッシュ完了
+    
+    Note over App,IaC: 3. 更新通知
+    App->>IaC: repository_dispatch<br/>client_payload: {image_tag, branch, etc}
+    
+    Note over IaC: 4. ECSリソース更新
+    IaC->>IaC: ワークフロー開始・payload取得
+    IaC->>ECR: イメージ存在確認
+    ECR-->>IaC: 確認完了
+    IaC->>IaC: terraform/terragrunt apply<br/>-var="app_image_tag=${image_tag}"
+    IaC->>ECS: タスク定義更新・サービス更新
+    ECS-->>IaC: 更新完了
+    IaC-->>App: デプロイ結果通知<br/>(コミットコメント)
+```
+
+アプリケーション側のCI/CDの事例（送信）：
+```yaml
+- name: Build Docker image
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.meta.outputs.image-tag }} .
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+
+      - name: Push Docker image to ECR
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.meta.outputs.image-tag }}
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+
+      - name: Trigger IaC Repository Deployment
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.IAC_REPO_PAT }}
+          repository: your-org/your-iac-repository  # 実際のIaCリポジトリ名に変更
+          event-type: ecr-image-updated
+          client-payload: | # github apiでclient-payloadとして送信する
+            {
+              "image_tag": "${{ steps.meta.outputs.image-tag }}",
+              "branch": "${{ steps.meta.outputs.branch }}",
+              "repository": "${{ env.ECR_REPOSITORY }}",
+              "commit_sha": "${{ github.sha }}",
+              "actor": "${{ github.actor }}"
+            }
+```
+
+IaC側でのCI/CD例（受信）：
+```yaml
+
+name: Deploy to ECS
+
+on:
+  repository_dispatch: # repository_dispatchで受取、github.event.client_payloadで取得する
+    types: [ecr-image-updated]
+
+env:
+  AWS_REGION: ap-northeast-1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout IaC code
+        uses: actions/checkout@v4
+
+      - name: Extract payload
+        id: payload
+        run: |
+          echo "image-tag=${{ github.event.client_payload.image_tag }}" >> $GITHUB_OUTPUT
+          echo "branch=${{ github.event.client_payload.branch }}" >> $GITHUB_OUTPUT
+          echo "repository=${{ github.event.client_payload.repository }}" >> $GITHUB_OUTPUT
+          echo "commit-sha=${{ github.event.client_payload.commit_sha }}" >> $GITHUB_OUTPUT
+          echo "actor=${{ github.event.client_payload.actor }}" >> $GITHUB_OUTPUT
+
+```
 
 ## 環境ごとのプロバイダー設定とリソース作成の制御
 

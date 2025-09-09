@@ -1,0 +1,97 @@
+name: Deploy to ECS
+
+on:
+  repository_dispatch:
+    types: [ecr-image-updated] # repository_dispatchで受取、github.event.client_payloadで取得する
+
+env:
+  AWS_REGION: ap-northeast-1
+  TERRAFORM_VERSION: "1.6.0"
+  TERRAGRUNT_VERSION: "0.86.2"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      id-token: write
+      contents: read
+    
+    steps:
+      - name: Checkout IaC code
+        uses: actions/checkout@v4
+      
+      - name: Extract payload
+        id: payload
+        run: |
+          echo "image-tag=${{ github.event.client_payload.image_tag }}" >> $GITHUB_OUTPUT
+          echo "branch=${{ github.event.client_payload.branch }}" >> $GITHUB_OUTPUT
+          echo "repository=${{ github.event.client_payload.repository }}" >> $GITHUB_OUTPUT
+          echo "commit-sha=${{ github.event.client_payload.commit_sha }}" >> $GITHUB_OUTPUT
+      
+      - name: Determine environment
+        id: env
+        run: |
+          if [[ "${{ steps.payload.outputs.branch }}" == "main" ]]; then
+            echo "environment=prod" >> $GITHUB_OUTPUT
+          elif [[ "${{ steps.payload.outputs.branch }}" == "develop" ]]; then
+            echo "environment=dev" >> $GITHUB_OUTPUT
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Configure AWS OIDC
+        uses: ./.github/actions/get-role-aws
+        with:
+          environment: ${{ steps.env.outputs.environment }}
+      
+      - name: Verify ECR image exists
+        run: |
+          aws ecr describe-images \
+            --repository-name ${{ steps.payload.outputs.repository }} \
+            --image-ids imageTag=${{ steps.payload.outputs.image-tag }} \
+            --region ${{ env.AWS_REGION }}
+      
+      - name: Setup IaC Tools
+        uses: ./.github/actions/setup-terraform
+        with:
+          tf_version: ${{ env.TERRAFORM_VERSION }}
+          tg_version: ${{ env.TERRAGRUNT_VERSION }}
+      
+      - name: Update ECS Task Definition
+        working-directory: terraform/environments/${{ steps.env.outputs.environment }}
+        run: |
+          # Terraformを使用する場合
+          terraform init
+          terraform plan \
+            -var="app_image_tag=${{ steps.payload.outputs.image-tag }}" \
+            -out=tfplan
+          terraform apply tfplan
+          
+          # Terragruntを使用する場合
+          # terragrunt init
+          # terragrunt plan -var="app_image_tag=${{ steps.payload.outputs.image-tag }}"
+          # terragrunt apply -auto-approve -var="app_image_tag=${{ steps.payload.outputs.image-tag }}"
+      
+      - name: Comment deployment result
+        uses: actions/github-script@v7
+        if: always()
+        with:
+          github-token: ${{ secrets.IAC_REPO_PAT }}
+          script: |
+            const { repository, commit_sha } = context.payload.client_payload;
+            const environment = "${{ steps.env.outputs.environment }}";
+            const imageTag = "${{ steps.payload.outputs.image-tag }}";
+            const status = "${{ job.status }}";
+            
+            // アプリケーションリポジトリにデプロイ結果をコメント
+            await github.rest.repos.createCommitComment({
+              owner: "your-org",  // 実際の組織名に変更してください
+              repo: repository,   // client_payloadから取得したリポジトリ名を使用
+              commit_sha: commit_sha,
+              body: `🚀 **ECS Deployment ${status.toUpperCase()}**\n\n` +
+                    `**Environment:** ${environment}\n` +
+                    `**Image Tag:** \`${imageTag}\`\n` +
+                    `**Repository:** ${repository}\n` +
+                    `**Status:** ${status === 'success' ? '✅' : '❌'} ${status}`
+            });
