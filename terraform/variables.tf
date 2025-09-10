@@ -10,6 +10,12 @@ variable "github_access_token" {
   sensitive   = true
 }
 
+variable "container_image" {
+  description = "Complete Docker image URI including tag"
+  type        = string
+  default     = null
+}
+
 # ECR/ECS/Fargateの変数設定
 variable "environment" {
   description = "環境名（例：local、dev、staging、prod）"

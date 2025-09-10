@@ -678,7 +678,7 @@ sequenceDiagram
           event-type: ecr-image-updated
           client-payload: | # github apiでclient-payloadとして送信する
             {
-              "image_tag": "${{ steps.meta.outputs.image-tag }}",
+              "container_image": "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.meta.outputs.image-tag }}",
               "branch": "${{ steps.meta.outputs.branch }}",
               "repository": "${{ env.ECR_REPOSITORY }}",
               "commit_sha": "${{ github.sha }}",
@@ -713,7 +713,7 @@ jobs:
       - name: Extract payload
         id: payload
         run: |
-          echo "image-tag=${{ github.event.client_payload.image_tag }}" >> $GITHUB_OUTPUT
+          echo "container-image=${{ github.event.client_payload.container-image }}" >> $GITHUB_OUTPUT
           echo "branch=${{ github.event.client_payload.branch }}" >> $GITHUB_OUTPUT
           echo "repository=${{ github.event.client_payload.repository }}" >> $GITHUB_OUTPUT
           echo "commit-sha=${{ github.event.client_payload.commit_sha }}" >> $GITHUB_OUTPUT

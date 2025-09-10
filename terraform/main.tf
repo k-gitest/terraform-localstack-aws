@@ -191,7 +191,8 @@ module "ecs_fargate_service" {
 
   service_name = "${var.project_name}-backend-service-${var.environment}"
   cluster_name = try(module.ecs_cluster[0].cluster_name, "")
-  container_image = try(module.ecr[0].repository_url, "")
+  # 条件分岐：外部から渡された場合はそれを使用、そうでなければデフォルト
+  container_image = var.container_image != null ? var.container_image : "${try(module.ecr[0].repository_url, "")}:latest"
   
   # リソース設定
   cpu = local.env_config.backend_cpu

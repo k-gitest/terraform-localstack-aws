@@ -121,7 +121,10 @@ module "ecs_fargate_service" {
   # container_image = try(module.ecr[0].repository_url, "")
 
   cluster_name = data.terraform_remote_state.foundation.outputs.cluster_name
-  container_image = data.terraform_remote_state.foundation.outputs.repository_url
+  # container_image = data.terraform_remote_state.foundation.outputs.repository_url
+  
+  # 条件分岐：外部から渡された場合はそれを使用、そうでなければデフォルト
+  container_image = var.container_image != null ? var.container_image : data.terraform_remote_state.foundation.outputs.repository_url
   
   # リソース設定
   cpu = local.env_config.backend_cpu

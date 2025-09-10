@@ -9,3 +9,9 @@ variable "github_access_token" {
   type        = string
   sensitive   = true
 }
+
+variable "container_image" {
+  description = "Complete Docker image URI including tag"
+  type        = string
+  default     = null
+}

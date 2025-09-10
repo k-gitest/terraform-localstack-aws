@@ -17,6 +17,12 @@ variable "environment" {
   default     = "dev"
 }
 
+variable "container_image" {
+  description = "Complete Docker image URI including tag"
+  type        = string
+  default     = null
+}
+
 variable "project_name" {
   description = "プロジェクト名"
   type        = string
