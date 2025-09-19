@@ -325,3 +325,66 @@ resource "aws_iam_role_policy_attachment" "prod_restrictions" {
   role       = aws_iam_role.github_actions["prod"].name
 }
 
+# s3 アプリデプロイ用のポリシー
+resource "aws_iam_policy" "app_deploy" {
+  for_each = toset(var.environments)
+  
+  name        = "${var.project_name}-AppDeploy-${each.value}"
+  description = "アプリケーションデプロイ用ポリシー for ${each.value} environment"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      # S3バケットへのデプロイ権限
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket",
+          "s3:PutObjectAcl",
+          "s3:GetObjectAcl"
+        ]
+        Resource = [
+          "arn:aws:s3:::${var.project_name}-${each.value}-*",
+          "arn:aws:s3:::${var.project_name}-${each.value}-*/*"
+        ]
+      },
+      # CloudFrontキャッシュクリア権限
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudfront:CreateInvalidation",
+          "cloudfront:GetInvalidation",
+          "cloudfront:ListInvalidations"
+        ]
+        Resource = "*"
+      },
+      # CloudFront distribution情報取得権限
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudfront:GetDistribution",
+          "cloudfront:ListDistributions"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+
+  tags = {
+    Name        = "${var.project_name}-AppDeploy-${each.value}"
+    Environment = each.value
+    Project     = var.project_name
+    ManagedBy   = "terraform"
+  }
+}
+
+# アプリデプロイポリシーをロールにアタッチ
+resource "aws_iam_role_policy_attachment" "app_deploy" {
+  for_each = toset(var.environments)
+  
+  policy_arn = aws_iam_policy.app_deploy[each.value].arn
+  role       = aws_iam_role.github_actions[each.value].name
+}

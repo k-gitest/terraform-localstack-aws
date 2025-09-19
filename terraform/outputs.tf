@@ -40,3 +40,15 @@ output "aurora_cluster_identifiers" {
       module.aurora_clusters[0].cluster_identifiers[cluster_name]
   }
 }
+
+# s3フロントアプリケーション用: GitHub Secrets設定用の統合出力
+output "github_repository_secrets" {
+  description = "GitHub リポジトリに設定すべきSecrets（コピー&ペースト用）"
+  value = {
+    for env in var.environments : env => {
+      AWS_ROLE_ARN               = aws_iam_role.github_actions[env].arn
+      S3_BUCKET_NAME             = module.frontend[env].s3_bucket_name
+      CLOUDFRONT_DISTRIBUTION_ID = module.frontend[env].cloudfront_distribution_id
+    }
+  }
+}
