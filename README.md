@@ -102,8 +102,16 @@ Terragruntを用いることで、Terraformの構成をDRY（Don't Repeat Yourse
 │   │   │   ├── main.tf         # Auroraクラスター、インスタンス、パラメータグループ、セキュリティグループ定義
 │   │   │   ├── variables.tf
 │   │   │   └── outputs.tf
-│   │   └── alb/                # ALBモジュール
-│   │       ├── main.tf         # ALB本体、ターゲットグループ、HTTP/HTTPSリスナー、パスベースルーティングルール定義
+│   │   ├── alb/                # ALBモジュール
+│   │   │   ├── main.tf         # ALB本体、ターゲットグループ、HTTP/HTTPSリスナー、パスベースルーティングルール定義
+│   │   │   ├── variables.tf
+│   │   │   └── outputs.tf
+│   │   ├── sns/                # SNSモジュール
+│   │   │   ├── main.tf         # 
+│   │   │   ├── variables.tf
+│   │   │   └── outputs.tf
+│   │   └── sqs/                # SQSモジュール
+│   │       ├── main.tf         # 
 │   │       ├── variables.tf
 │   │       └── outputs.tf
 │   ├── main.tf                 # ルートモジュールのmain.tf (modules/ を呼び出す)

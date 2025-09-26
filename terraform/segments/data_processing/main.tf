@@ -18,6 +18,32 @@ module "image_processor_lambda" {
   tags = local.common_tags
 }
 
+# SNSモジュール
+module "sns" {
+  source = "./modules/sns"
+  count  = var.create_sns ? 1 : 0
+
+  topic_name = "${local.prefix}-my-topic"
+  subscriptions = {
+    # Lambdaと連携する場合
+    lambda = {
+      protocol = "lambda"
+      endpoint = "arn:aws:lambda:${var.aws_region}:${var.aws_account_id}:function:my-function"
+    }
+  }
+  tags       = local.default_tags
+}
+
+# SQSモジュール
+module "sqs" {
+  source = "./modules/sqs"
+  count  = var.create_sqs ? 1 : 0
+
+  queue_name = "${local.prefix}-my-queue"
+  is_fifo_queue = false
+  tags       = local.default_tags
+}
+
 # データソース
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {
