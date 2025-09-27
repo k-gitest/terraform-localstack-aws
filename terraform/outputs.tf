@@ -52,3 +52,25 @@ output "github_repository_secrets" {
     }
   }
 }
+
+# sns/sqsの出力定義
+output "sns_topic_arns" {
+  description = "SNSトピックのARNのマップ"
+  value = {
+    for k, v in module.sns_topics : k => v.sns_topic_arn
+  }
+}
+
+output "sqs_queue_arns" {
+  description = "SQSキューのARNのマップ"
+  value = {
+    for k, v in module.sqs_queues : k => v.sqs_queue_arn
+  }
+}
+
+output "sqs_queue_urls" {
+  description = "SQSキューのURLのマップ"
+  value = {
+    for k, v in module.sqs_queues : k => v.sqs_queue_url
+  }
+}

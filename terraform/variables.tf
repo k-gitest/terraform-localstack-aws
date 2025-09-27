@@ -71,3 +71,31 @@ variable "aurora_mysql_password" {
   type        = string
   sensitive   = true
 }
+
+# sns/sqsの変数設定
+variable "sns_topics" {
+  description = "作成するSNSトピックのマップ"
+  type = map(object({
+    subscriptions = optional(map(object({
+      protocol = string
+      endpoint = string
+    })), {})
+    kms_key_arn                = optional(string)
+    success_feedback_role_arn  = optional(string)
+    tags                      = optional(map(string), {})
+  }))
+  default = {}
+}
+
+variable "sqs_queues" {
+  description = "作成するSQSキューのマップ"
+  type = map(object({
+    is_fifo_queue              = optional(bool, false)
+    visibility_timeout_seconds = optional(number, 30)
+    kms_key_arn               = optional(string)
+    dead_letter_queue_arn     = optional(string)
+    max_receive_count         = optional(number, 3)
+    tags                      = optional(map(string), {})
+  }))
+  default = {}
+}

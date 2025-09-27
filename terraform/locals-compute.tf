@@ -163,6 +163,57 @@ locals {
     }
   }
 
+  # SNS設定
+  sns_topics = var.environment == "prod" ? {
+    "user-notifications" = {
+      subscriptions = {
+        email = {
+          protocol = "email"
+          endpoint = "admin@yourcompany.com"
+        }
+        lambda = {
+          protocol = "lambda"
+          endpoint = "arn:aws:lambda:${var.aws_region}:${var.aws_account_id}:function:${var.project_name}-notification-handler-${var.environment}"
+        }
+      }
+      kms_key_arn = var.sns_kms_key_arn
+      success_feedback_role_arn = var.sns_success_feedback_role_arn
+      tags = {
+        Purpose = "User notifications"
+        Tier    = "critical"
+      }
+    }
+  } : {
+    # dev/local環境用の設定
+    "user-notifications" = {
+      subscriptions = {
+        email = {
+          protocol = "email"
+          endpoint = "dev-team@yourcompany.com"
+        }
+      }
+      tags = {
+        Purpose = "User notifications"
+        Tier    = "development"
+      }
+    }
+  }
+
+  # SQS設定
+  sqs_queues = {
+    "task-processing" = {
+      is_fifo_queue              = false
+      visibility_timeout_seconds = 60
+      kms_key_arn               = var.environment == "prod" ? var.sqs_kms_key_arn : null
+      dead_letter_queue_arn     = null
+      max_receive_count         = 3
+      tags = {
+        Purpose = "Background task processing"
+        Tier    = var.environment == "prod" ? "high" : "development"
+      }
+    }
+  }
+
   # 環境変数設定
   backend_env_vars = [
     { name = "NODE_ENV", value = var.environment },

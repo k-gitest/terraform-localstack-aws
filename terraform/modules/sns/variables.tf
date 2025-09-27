@@ -1,19 +1,31 @@
 variable "topic_name" {
-  description = "The name of the SNS topic to create."
+  description = "作成するSNSトピックの名前"
   type        = string
 }
 
 variable "subscriptions" {
-  description = "A map of subscriptions to create for the topic. Keys are subscription IDs, values are objects with protocol and endpoint."
-  type        = map(object({
+  description = "トピックに作成するサブスクリプションのマップ"
+  type = map(object({
     protocol = string
     endpoint = string
   }))
-  default     = {}
+  default = {}
+}
+
+variable "kms_key_arn" {
+  description = "暗号化に使用するKMSキーのARN"
+  type        = string
+  default     = null
+}
+
+variable "success_feedback_role_arn" {
+  description = "成功フィードバック用のIAMロールのARN"
+  type        = string
+  default     = null
 }
 
 variable "tags" {
-  description = "A map of tags to assign to the SNS topic."
+  description = "SNSトピックに割り当てるタグのマップ"
   type        = map(string)
   default     = {}
 }
