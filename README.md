@@ -107,11 +107,11 @@ Terragruntを用いることで、Terraformの構成をDRY（Don't Repeat Yourse
 │   │   │   ├── variables.tf
 │   │   │   └── outputs.tf
 │   │   ├── sns/                # SNSモジュール
-│   │   │   ├── main.tf         # 
+│   │   │   ├── main.tf         # SNSトピック、サブスクリプション設定
 │   │   │   ├── variables.tf
 │   │   │   └── outputs.tf
 │   │   └── sqs/                # SQSモジュール
-│   │       ├── main.tf         # 
+│   │       ├── main.tf         # SQSキュー、デッドレターキュー設定
 │   │       ├── variables.tf
 │   │       └── outputs.tf
 │   ├── main.tf                 # ルートモジュールのmain.tf (modules/ を呼び出す)
@@ -120,7 +120,7 @@ Terragruntを用いることで、Terraformの構成をDRY（Don't Repeat Yourse
 │   ├── locals.tf               # 共通・基本設定
 │   ├── locals-storage.tf       # S3・ストレージ関連
 │   ├── locals-database.tf      # RDS・Aurora関連
-│   └── locals-compute.tf       # ECS・Lambda・ALB関連
+│   └── locals-compute.tf       # ECS・Lambda・ALB・SNS・SQS関連
 ├── cicd
 │   ├── actions      # composite
 │   │    ├── comment-pr   
@@ -537,6 +537,30 @@ graph TB
   - SSL証明書設定（ACM連携またはCloudFrontデフォルト）
   - WAF統合（オプション）
   - アクセスログ設定
+
+### メッセージングモジュール
+
+**SNS (modules/sns)**
+- **目的**: アプリケーション間の非同期メッセージング・通知の配信
+- **主要リソース**:
+  - SNSトピック（メッセージの発行・配信）
+  - サブスクリプション設定（Email、Lambda、SQS、HTTP/HTTPS対応）
+  - KMS暗号化設定（メッセージの暗号化）
+  - 配信成功・失敗フィードバック設定（CloudWatch Logs連携）
+  - アクセス制御ポリシー（発行・購読権限の管理）
+  - デッドレターキュー連携（配信失敗時の処理）
+
+**SQS (modules/sqs)**
+- **目的**: 非同期メッセージキューイング・タスクの分散処理
+- **主要リソース**:
+  - SQSキュー（標準・FIFOキュー対応）
+  - 可視性タイムアウト設定（メッセージ処理時間の制御）
+  - メッセージ保持期間設定（1分～14日間）
+  - デッドレターキュー設定（処理失敗メッセージの隔離）
+  - KMS暗号化設定（メッセージの暗号化）
+  - バッチ処理設定（複数メッセージの一括受信）
+  - Lambda・ECS・EC2との統合機能
+  - CloudWatchメトリクス・アラーム設定
 
 ## OIDC認証用のプロバイダー設定
 
