@@ -91,6 +91,15 @@ resource "aws_iam_role" "github_actions" {
 }
 
 # Terraform実行用のポリシー
+# !!! 🚨 セキュリティリスク警告 🚨 !!!
+# 【本ポリシーはインフラ構築時の暫定的なフルアクセス権限を含みます】
+# このポリシーのまま実装すると、多くのActionに"*"、Resourceに"*"が含まれており、攻撃者に悪用された場合、
+# 環境全体（DB、ECS、VPCなど）の**破壊やデータ窃取を許します**。
+# 🚀 【実装時の最優先事項】
+# 1. Actionを厳密に必要なAPIコールに限定すること。
+# 2. Resourceを**特定のARN**に限定すること (例: ${var.project_name}-* で始まるリソースのみ)。
+# 3. 特にRDSのDelete/Terminate, ECSのDelete Clusterなどの**破壊的な操作はDenyを検討**すること。
+
 resource "aws_iam_policy" "terraform_execution" {
   for_each = toset(var.environments)
   

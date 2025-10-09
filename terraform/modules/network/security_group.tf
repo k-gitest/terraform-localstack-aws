@@ -150,6 +150,13 @@ resource "aws_vpc_security_group_egress_rule" "app_to_mysql" {
 
 # Application アウトバウンドルール: HTTPS（インターネット）
 resource "aws_vpc_security_group_egress_rule" "app_https_egress" {
+  # !!! 🚨 セキュリティリスク警告 🚨 !!!
+  # cidr_ipv4 = "0.0.0.0/0" は、ランサムウェア等の攻撃者がDBから窃取したデータを
+  # 外部のC&Cサーバーへ転送するための「黄金の出口」となります。
+  # この設定が有効な場合、転送が正規のHTTPS通信として処理されるため、
+  # ネットワーク監視による不正データ持ち出しの検知が極めて困難になります。
+  # → 実装する場合、このルールを削除し、AWSサービスへの接続はVPCエンドポイント (VPCE) に切り替えること。
+  # → 外部APIへの接続は、特定のIPレンジ/FQDNに限定したプロキシ経由とすること。
   security_group_id = aws_security_group.application_sg.id
   description       = "Allow HTTPS to internet (S3, external APIs)"
 
@@ -165,6 +172,10 @@ resource "aws_vpc_security_group_egress_rule" "app_https_egress" {
 
 # Application アウトバウンドルール: HTTP（インターネット）
 resource "aws_vpc_security_group_egress_rule" "app_http_egress" {
+  # !!! 🚨 セキュリティリスク警告 🚨 !!!
+  # HTTP (ポート80) のアウトバウンドを 0.0.0.0/0 で許可することは、マルウェアのダウンロードや
+  # コマンド＆コントロール（C2）通信の経路を提供します。
+  # HTTPS (443) と同様、実装時に、この設定は可能な限り削除し、特定の宛先に限定します
   security_group_id = aws_security_group.application_sg.id
   description       = "Allow HTTP to internet (external APIs)"
 
