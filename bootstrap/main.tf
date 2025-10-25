@@ -110,42 +110,81 @@ resource "aws_iam_policy" "terraform_execution" {
     Version = "2012-10-17"
     Statement = [
       # EC2関連
+      # 読み取り専用操作（安全なのでリソース制限なし）
       {
         Effect = "Allow"
         Action = [
-          "ec2:*",
+          "ec2:Describe*",        # 全ての情報取得（DescribeVpcs, DescribeSubnets等）
+          "ec2:GetConsole*"       # コンソール出力取得
         ]
         Resource = "*"
       },
+
       # VPC関連
+      # 書き込み操作（リソース作成・変更・削除）
       {
         Effect = "Allow"
         Action = [
-          "ec2:CreateVpc*",
-          "ec2:DeleteVpc*",
-          "ec2:ModifyVpc*",
-          "ec2:DescribeVpc*",
-          "ec2:CreateSubnet*",
-          "ec2:DeleteSubnet*",
-          "ec2:ModifySubnet*",
-          "ec2:DescribeSubnet*",
-          "ec2:CreateRouteTable*",
-          "ec2:DeleteRouteTable*",
-          "ec2:ModifyRouteTable*",
-          "ec2:DescribeRouteTable*",
-          "ec2:CreateRoute*",
-          "ec2:DeleteRoute*",
-          "ec2:CreateInternetGateway*",
-          "ec2:DeleteInternetGateway*",
-          "ec2:AttachInternetGateway*",
-          "ec2:DetachInternetGateway*",
-          "ec2:DescribeInternetGateway*",
-          "ec2:CreateSecurityGroup*",
-          "ec2:DeleteSecurityGroup*",
-          "ec2:ModifySecurityGroup*",
-          "ec2:DescribeSecurityGroup*",
-          "ec2:AuthorizeSecurityGroup*",
-          "ec2:RevokeSecurityGroup*"
+          # VPC
+          "ec2:CreateVpc",
+          "ec2:DeleteVpc",
+          "ec2:ModifyVpcAttribute",
+          
+          # Subnet
+          "ec2:CreateSubnet",
+          "ec2:DeleteSubnet",
+          "ec2:ModifySubnetAttribute",
+          
+          # Route Table
+          "ec2:CreateRouteTable",
+          "ec2:DeleteRouteTable",
+          "ec2:AssociateRouteTable",
+          "ec2:DisassociateRouteTable",
+          "ec2:CreateRoute",
+          "ec2:DeleteRoute",
+          "ec2:ReplaceRoute",
+          
+          # Internet Gateway
+          "ec2:CreateInternetGateway",
+          "ec2:DeleteInternetGateway",
+          "ec2:AttachInternetGateway",
+          "ec2:DetachInternetGateway",
+          
+          # NAT Gateway
+          "ec2:CreateNatGateway",
+          "ec2:DeleteNatGateway",
+          
+          # Elastic IP
+          "ec2:AllocateAddress",
+          "ec2:ReleaseAddress",
+          "ec2:AssociateAddress",
+          "ec2:DisassociateAddress",
+          
+          # Security Group
+          "ec2:CreateSecurityGroup",
+          "ec2:DeleteSecurityGroup",
+          "ec2:AuthorizeSecurityGroupIngress",
+          "ec2:AuthorizeSecurityGroupEgress",
+          "ec2:RevokeSecurityGroupIngress",
+          "ec2:RevokeSecurityGroupEgress",
+          "ec2:ModifySecurityGroupRules",
+          
+          # Network ACL
+          "ec2:CreateNetworkAcl",
+          "ec2:DeleteNetworkAcl",
+          "ec2:CreateNetworkAclEntry",
+          "ec2:DeleteNetworkAclEntry",
+          "ec2:ReplaceNetworkAclEntry",
+          "ec2:ReplaceNetworkAclAssociation",
+          
+          # VPC Endpoints
+          "ec2:CreateVpcEndpoint",
+          "ec2:DeleteVpcEndpoints",
+          "ec2:ModifyVpcEndpoint",
+          
+          # Tags
+          "ec2:CreateTags",
+          "ec2:DeleteTags"
         ]
         Resource = "*"
       },
