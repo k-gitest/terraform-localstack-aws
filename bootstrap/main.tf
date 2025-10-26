@@ -109,7 +109,9 @@ resource "aws_iam_policy" "terraform_execution" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
+      # ===================================
       # EC2関連
+      # ===================================
       # 読み取り専用操作（安全なのでリソース制限なし）
       {
         Effect = "Allow"
@@ -120,7 +122,9 @@ resource "aws_iam_policy" "terraform_execution" {
         Resource = "*"
       },
 
+      # ===================================
       # VPC関連
+      # ===================================
       # 書き込み操作（リソース作成・変更・削除）
       {
         Effect = "Allow"
@@ -188,17 +192,88 @@ resource "aws_iam_policy" "terraform_execution" {
         ]
         Resource = "*"
       },
+
+      # ===================================
       # S3関連
+      # ===================================
+      # 1. 読み取り専用操作
       {
         Effect = "Allow"
         Action = [
-          "s3:*"
+          "s3:GetObject",
+          "s3:GetObjectVersion",
+          "s3:GetObjectAttributes",
+          "s3:GetBucketLocation",
+          "s3:GetBucketVersioning",
+          "s3:GetBucketPolicy",
+          "s3:GetBucketAcl",
+          "s3:GetBucketCORS",
+          "s3:GetBucketWebsite",
+          "s3:GetLifecycleConfiguration",
+          "s3:GetReplicationConfiguration",
+          "s3:GetEncryptionConfiguration",
+          "s3:ListBucket",
+          "s3:ListBucketVersions",
+          "s3:ListBucketMultipartUploads"
         ]
         Resource = [
-          "arn:aws:s3:::${var.project_name}-*",
-          "arn:aws:s3:::${var.project_name}-*/*"
+          "arn:aws:s3:::${var.project_name}-${each.value}-*",
+          "arn:aws:s3:::${var.project_name}-${each.value}-*/*"
         ]
       },
+
+      # 2. 書き込み操作（バケット管理）
+      {
+        Effect = "Allow"
+        Action = [
+          # バケット作成・削除
+          "s3:CreateBucket",
+          "s3:DeleteBucket", # prod_restrictionsでDenyされる
+          
+          # バケット設定
+          "s3:PutBucketVersioning",
+          "s3:PutBucketAcl",
+          "s3:PutBucketPolicy",
+          "s3:DeleteBucketPolicy", # prod_restrictionsでDenyされる
+          "s3:PutBucketCORS",
+          "s3:PutBucketWebsite",
+          "s3:DeleteBucketWebsite",
+          "s3:PutLifecycleConfiguration",
+          "s3:PutReplicationConfiguration",
+          "s3:PutEncryptionConfiguration",
+          "s3:PutBucketPublicAccessBlock",
+          "s3:PutBucketOwnershipControls",
+          
+          # バケット通知設定
+          "s3:PutBucketNotification",
+          "s3:GetBucketNotification",
+          
+          # タグ管理
+          "s3:PutBucketTagging",
+          "s3:GetBucketTagging"
+        ]
+        Resource = "arn:aws:s3:::${var.project_name}-${each.value}-*"
+      },
+
+      # 3. オブジェクト操作
+      {
+        Effect = "Allow"
+        Action = [
+          # オブジェクト書き込み
+          "s3:PutObject",
+          "s3:PutObjectAcl",
+          
+          # オブジェクト削除（prod_restrictionsでDenyされる）
+          "s3:DeleteObject",
+          "s3:DeleteObjectVersion",
+          
+          # マルチパートアップロード
+          "s3:AbortMultipartUpload",
+          "s3:ListMultipartUploadParts"
+        ]
+        Resource = "arn:aws:s3:::${var.project_name}-${each.value}-*/*"
+      },
+
       # IAM関連（制限付き）
       {
         Effect = "Allow"
@@ -348,6 +423,7 @@ resource "aws_iam_policy" "prod_restrictions" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
+      # EC2/RDSの破壊的操作を特定リージョン外で拒否
       {
         Effect = "Deny"
         Action = [
@@ -361,9 +437,31 @@ resource "aws_iam_policy" "prod_restrictions" {
             "aws:RequestedRegion": ["ap-northeast-1"]
           }
         }
+      },
+
+      # S3の破壊的操作を完全に拒否
+      {
+        Effect = "Deny"
+        Action = [
+          "s3:DeleteBucket",
+          "s3:DeleteObject",
+          "s3:DeleteObjectVersion",
+          "s3:DeleteBucketPolicy"
+        ]
+        Resource = [
+          "arn:aws:s3:::${var.project_name}-prod-*",
+          "arn:aws:s3:::${var.project_name}-prod-*/*"
+        ]
       }
     ]
   })
+
+  tags = {
+    Name        = "${var.project_name}-ProdRestrictions"
+    Environment = "prod"
+    Project     = var.project_name
+    ManagedBy   = "terraform"
+  }
 }
 
 resource "aws_iam_role_policy_attachment" "prod_restrictions" {
@@ -373,7 +471,9 @@ resource "aws_iam_role_policy_attachment" "prod_restrictions" {
   role       = aws_iam_role.github_actions["prod"].name
 }
 
-# s3 アプリデプロイ用のポリシー
+# S3アプリデプロイ用のポリシー
+# これはアプリケーションリポジトリからのCI/CDデプロイ用
+# github actionsからawsを操作する場合のポリシー
 resource "aws_iam_policy" "app_deploy" {
   for_each = toset(var.environments)
   
@@ -383,13 +483,13 @@ resource "aws_iam_policy" "app_deploy" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      # S3バケットへのデプロイ権限
+      # S3バケットへのデプロイ権限（ビルド成果物のアップロード）
       {
         Effect = "Allow"
         Action = [
           "s3:GetObject",
           "s3:PutObject",
-          "s3:DeleteObject",
+          "s3:DeleteObject", # 古いファイルの削除用
           "s3:ListBucket",
           "s3:PutObjectAcl",
           "s3:GetObjectAcl"
