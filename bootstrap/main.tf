@@ -31,6 +31,29 @@ data "tls_certificate" "github_actions_deploy" {
   url = "https://token.actions.githubusercontent.com/.well-known/openid-configuration"
 }
 
+# ===================================
+# 事前準備: AWSアカウント情報の取得
+# ===================================
+# 
+# このデータソースで取得する情報:
+#   - account_id: AWSアカウントID (例: 123456789012)
+#   - arn: 実行者のARN
+#   - user_id: 実行者のユニークID
+#
+# 【重要】アカウントIDを明示的に指定する理由:
+#   ワイルドカード (::*:) を使用すると、任意のAWSアカウントのリソースを
+#   操作できてしまい、セキュリティリスクとなるため。
+#
+#   ❌ 危険: "arn:aws:iam::*:role/${var.project_name}-*"
+#   ✅ 安全: "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-*"
+#
+# 使用箇所:
+#   - terraform_execution ポリシーのIAM Resource指定
+#   - prod_restrictions ポリシーのIAM Resource指定
+#
+# 現在のアカウントIDを取得
+data "aws_caller_identity" "current" {}
+
 # GitHub OIDC プロバイダー
 resource "aws_iam_openid_connect_provider" "github" {
   url = "https://token.actions.githubusercontent.com"
@@ -274,34 +297,124 @@ resource "aws_iam_policy" "terraform_execution" {
         Resource = "arn:aws:s3:::${var.project_name}-${each.value}-*/*"
       },
 
-      # IAM関連（制限付き）
+      # ===================================
+      # IAM関連
+      # ===================================
+      # 1. 読み取り専用操作
+      {
+        Effect = "Allow"
+        Action = [
+          "iam:GetRole",
+          "iam:GetRolePolicy",
+          "iam:GetPolicy",
+          "iam:GetPolicyVersion",
+          "iam:GetInstanceProfile",
+          "iam:ListRoles",
+          "iam:ListRolePolicies",
+          "iam:ListAttachedRolePolicies",
+          "iam:ListPolicies",
+          "iam:ListPolicyVersions",
+          "iam:ListInstanceProfiles",
+          "iam:ListInstanceProfilesForRole"
+        ]
+        Resource = "*"  # 読み取りなので全体を許可
+      },
+
+      # 2. ロール管理（プロジェクト名とアカウントIDで制限）
       {
         Effect = "Allow"
         Action = [
           "iam:CreateRole",
           "iam:DeleteRole",
-          "iam:GetRole",
-          "iam:PassRole",
-          "iam:AttachRolePolicy",
-          "iam:DetachRolePolicy",
-          "iam:ListRolePolicies",
-          "iam:ListAttachedRolePolicies",
+          "iam:UpdateRole",
+          "iam:UpdateAssumeRolePolicy",
+          "iam:PutRolePolicy",
+          "iam:DeleteRolePolicy",
+          "iam:TagRole",
+          "iam:UntagRole"
+        ]
+        Resource = [
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-*"
+        ]
+      },
+
+      # 3. ポリシー管理（プロジェクト名とアカウントIDで制限）
+      {
+        Effect = "Allow"
+        Action = [
           "iam:CreatePolicy",
           "iam:DeletePolicy",
-          "iam:GetPolicy",
-          "iam:ListPolicies",
+          "iam:CreatePolicyVersion",
+          "iam:DeletePolicyVersion",
+          "iam:SetDefaultPolicyVersion",
+          "iam:TagPolicy",
+          "iam:UntagPolicy"
+        ]
+        Resource = [
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${var.project_name}-*"
+        ]
+      },
+
+      # 4. ポリシーアタッチ（特定ポリシーのみ許可）
+      {
+        Effect = "Allow"
+        Action = [
+          "iam:AttachRolePolicy",
+          "iam:DetachRolePolicy"
+        ]
+        Resource = [
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-*"
+        ]
+        Condition = {
+          ArnLike = {
+            # プロジェクト管理下のポリシーまたは特定のAWSマネージドポリシーのみ
+            "iam:PolicyARN": [
+              "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${var.project_name}-*",
+              "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole",
+              "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+            ]
+          }
+        }
+      },
+
+      # 5. PassRole（特定サービスのみ許可）
+      {
+        Effect = "Allow"
+        Action = [
+          "iam:PassRole"
+        ]
+        Resource = [
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-*"
+        ]
+        Condition = {
+          StringEquals = {
+            # PassRoleを許可するサービスを限定
+            "iam:PassedToService": [
+              "lambda.amazonaws.com",
+              "ecs-tasks.amazonaws.com",
+              "ec2.amazonaws.com",
+              "rds.amazonaws.com",
+              "amplify.amazonaws.com"
+            ]
+          }
+        }
+      },
+
+      # 6. インスタンスプロファイル管理
+      {
+        Effect = "Allow"
+        Action = [
           "iam:CreateInstanceProfile",
           "iam:DeleteInstanceProfile",
-          "iam:GetInstanceProfile",
           "iam:AddRoleToInstanceProfile",
           "iam:RemoveRoleFromInstanceProfile"
         ]
         Resource = [
-          "arn:aws:iam::*:role/${var.project_name}-*",
-          "arn:aws:iam::*:policy/${var.project_name}-*",
-          "arn:aws:iam::*:instance-profile/${var.project_name}-*"
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/${var.project_name}-*"
         ]
       },
+
       # Lambda関連
       {
         Effect = "Allow"
@@ -423,6 +536,10 @@ resource "aws_iam_policy" "prod_restrictions" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
+      # ===================================
+      # リソース保護（破壊的操作の拒否）
+      # ===================================
+
       # EC2/RDSの破壊的操作を特定リージョン外で拒否
       {
         Effect = "Deny"
@@ -452,6 +569,44 @@ resource "aws_iam_policy" "prod_restrictions" {
           "arn:aws:s3:::${var.project_name}-prod-*",
           "arn:aws:s3:::${var.project_name}-prod-*/*"
         ]
+      },
+
+      # ===================================
+      # セキュリティ強化（権限エスカレーション防止）
+      # ===================================
+
+      # IAMの破壊的操作を拒否
+      # 攻撃者がAdministratorAccess等をアタッチして全権限を取得するのを防ぐ
+      {
+        Effect = "Deny"
+        Action = [
+          "iam:DeleteRole",
+          "iam:DeletePolicy",
+          "iam:DeleteRolePolicy",
+          "iam:DetachRolePolicy"
+        ]
+        Resource = [
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-prod-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${var.project_name}-prod-*"
+        ]
+      },
+      
+      # 管理者権限ポリシーのアタッチを拒否
+      {
+        Effect = "Deny"
+        Action = [
+          "iam:AttachRolePolicy"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnLike = {
+            "iam:PolicyARN": [
+              "arn:aws:iam::aws:policy/AdministratorAccess",
+              "arn:aws:iam::aws:policy/PowerUserAccess",
+              "arn:aws:iam::aws:policy/IAMFullAccess"
+            ]
+          }
+        }
       }
     ]
   })
