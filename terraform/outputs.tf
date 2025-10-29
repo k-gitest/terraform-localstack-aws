@@ -41,14 +41,47 @@ output "aurora_cluster_identifiers" {
   }
 }
 
-# s3フロントアプリケーション用: GitHub Secrets設定用の統合出力
+# ===================================
+# GitHub Secrets設定用の統合出力
+# ===================================
+# フロント・バックエンドアプリケーション用: GitHub Secrets設定用の統合出力
 output "github_repository_secrets" {
   description = "GitHub リポジトリに設定すべきSecrets（コピー&ペースト用）"
+  
   value = {
-    for env in var.environments : env => {
-      AWS_ROLE_ARN               = aws_iam_role.github_actions[env].arn
-      S3_BUCKET_NAME             = module.frontend[env].s3_bucket_name
-      CLOUDFRONT_DISTRIBUTION_ID = module.frontend[env].cloudfront_distribution_id
+    # ===================================
+    # IaCリポジトリ用（Terraform実行）
+    # ===================================
+    iac = {
+      for env in var.environments : env => {
+        AWS_ROLE_ARN               = data.terraform_remote_state.bootstrap.outputs.github_actions_role_arns[env]
+        AWS_REGION                 = var.aws_region
+      }
+    }
+    
+    # ===================================
+    # フロントエンドリポジトリ用
+    # ===================================
+    frontend = {
+      for env in var.environments : env => {
+        AWS_ROLE_ARN               = data.terraform_remote_state.bootstrap.outputs.github_actions_frontend_role_arns[env]
+        AWS_REGION                 = var.aws_region
+        S3_BUCKET_NAME             = try(module.frontend[env].s3_bucket_name, "")
+        CLOUDFRONT_DISTRIBUTION_ID = try(module.frontend[env].cloudfront_distribution_id, "")
+      }
+    }
+    
+    # ===================================
+    # バックエンドリポジトリ用
+    # ===================================
+    backend = {
+      for env in var.environments : env => {
+        AWS_ROLE_ARN       = data.terraform_remote_state.bootstrap.outputs.github_actions_backend_role_arns[env]
+        AWS_REGION         = var.aws_region
+        ECR_REPOSITORY_URL = try(module.ecr[env].repository_url, "")
+        ECS_CLUSTER_NAME   = try(module.ecs_cluster[env].cluster_name, "")
+        ECS_SERVICE_NAME   = try(module.ecs_service[env].service_name, "")
+      }
     }
   }
 }

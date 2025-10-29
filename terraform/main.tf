@@ -311,3 +311,13 @@ data "aws_region" "current" {}
 data "aws_caller_identity" "current" {
   count = var.environment == "local" ? 0 : 1
 }
+
+data "terraform_remote_state" "bootstrap" {
+  backend = "remote"  # s3にstate保存している場合は "s3"
+  
+  config = {
+    bucket = "your-terraform-state-bucket"
+    key    = "bootstrap/terraform.tfstate"
+    region = "ap-northeast-1"
+  }
+}

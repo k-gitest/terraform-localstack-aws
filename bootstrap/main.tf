@@ -74,7 +74,7 @@ resource "aws_iam_openid_connect_provider" "github" {
   }
 }
 
-# 各環境用のIAMロール
+# terraform実行各環境用のIAMロール
 resource "aws_iam_role" "github_actions" {
   for_each = toset(var.environments)
   
@@ -544,15 +544,217 @@ resource "aws_iam_policy" "terraform_execution" {
         ]
       },
 
+      # ===================================
       # ECS関連
+      # ===================================
+
+      # 1. 読み取り専用操作
       {
         Effect = "Allow"
         Action = [
-          "ecs:*",
-          "ecr:*"
+          # クラスター
+          "ecs:DescribeClusters",
+          "ecs:ListClusters",
+          
+          # サービス
+          "ecs:DescribeServices",
+          "ecs:ListServices",
+          
+          # タスク
+          "ecs:DescribeTasks",
+          "ecs:DescribeTaskDefinition",
+          "ecs:ListTasks",
+          "ecs:ListTaskDefinitions",
+          "ecs:ListTaskDefinitionFamilies",
+          
+          # コンテナインスタンス
+          "ecs:DescribeContainerInstances",
+          "ecs:ListContainerInstances",
+          
+          # その他
+          "ecs:ListAttributes",
+          "ecs:ListAccountSettings",
+          "ecs:DescribeCapacityProviders",
+          "ecs:ListTagsForResource"
         ]
-        Resource = "*"
+        Resource = "*"  # 読み取りなので全体を許可
       },
+
+      # 2. クラスター管理
+      {
+        Effect = "Allow"
+        Action = [
+          "ecs:CreateCluster",
+          "ecs:DeleteCluster",
+          "ecs:UpdateCluster",
+          "ecs:PutClusterCapacityProviders",
+          "ecs:TagResource",
+          "ecs:UntagResource"
+        ]
+        Resource = [
+          "arn:aws:ecs:*:${data.aws_caller_identity.current.account_id}:cluster/${var.project_name}-*"
+        ]
+      },
+
+      # 3. タスク定義管理
+      {
+        Effect = "Allow"
+        Action = [
+          "ecs:RegisterTaskDefinition",
+          "ecs:DeregisterTaskDefinition",
+          "ecs:TagResource"
+        ]
+        Resource = "*"  # タスク定義はARNに名前が含まれないため
+      },
+
+      # 4. サービス管理
+      {
+        Effect = "Allow"
+        Action = [
+          "ecs:CreateService",
+          "ecs:UpdateService",
+          "ecs:DeleteService",
+          "ecs:TagResource",
+          "ecs:UntagResource"
+        ]
+        Resource = [
+          "arn:aws:ecs:*:${data.aws_caller_identity.current.account_id}:service/${var.project_name}-*/*"
+        ]
+      },
+
+      # 5. タスク実行
+      {
+        Effect = "Allow"
+        Action = [
+          "ecs:RunTask",
+          "ecs:StartTask",
+          "ecs:StopTask",
+          "ecs:UpdateTaskSet",
+          "ecs:DeleteTaskSet"
+        ]
+        Resource = [
+          "arn:aws:ecs:*:${data.aws_caller_identity.current.account_id}:task/${var.project_name}-*/*",
+          "arn:aws:ecs:*:${data.aws_caller_identity.current.account_id}:task-definition/${var.project_name}-*:*"
+        ]
+      },
+
+      # 6. キャパシティプロバイダー管理
+      {
+        Effect = "Allow"
+        Action = [
+          "ecs:CreateCapacityProvider",
+          "ecs:UpdateCapacityProvider",
+          "ecs:DeleteCapacityProvider"
+        ]
+        Resource = [
+          "arn:aws:ecs:*:${data.aws_caller_identity.current.account_id}:capacity-provider/${var.project_name}-*"
+        ]
+      },
+
+      # 7. IAM PassRole（ECSタスク実行用）
+      {
+        Effect = "Allow"
+        Action = [
+          "iam:PassRole"
+        ]
+        Resource = [
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-*-ecs-*"
+        ]
+        Condition = {
+          StringEquals = {
+            "iam:PassedToService": [
+              "ecs-tasks.amazonaws.com"
+            ]
+          }
+        }
+      },
+
+      # ===================================
+      # ECR関連
+      # ===================================
+
+      # 8. ECR読み取り専用操作
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:DescribeRepositories",
+          "ecr:DescribeImages",
+          "ecr:ListImages",
+          "ecr:ListTagsForResource",
+          "ecr:GetRepositoryPolicy",
+          "ecr:GetLifecyclePolicy",
+          "ecr:GetLifecyclePolicyPreview"
+        ]
+        Resource = [
+          "arn:aws:ecr:*:${data.aws_caller_identity.current.account_id}:repository/${var.project_name}-*"
+        ]
+      },
+
+      # 9. ECR認証トークン取得
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken"
+        ]
+        Resource = "*"  # GetAuthorizationTokenはリソース指定不可
+      },
+
+      # 10. ECRリポジトリ管理
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:CreateRepository",
+          "ecr:DeleteRepository",
+          "ecr:PutRepositoryPolicy",
+          "ecr:DeleteRepositoryPolicy",
+          "ecr:SetRepositoryPolicy",
+          "ecr:PutLifecyclePolicy",
+          "ecr:DeleteLifecyclePolicy",
+          "ecr:PutImageTagMutability",
+          "ecr:PutImageScanningConfiguration",
+          "ecr:TagResource",
+          "ecr:UntagResource"
+        ]
+        Resource = [
+          "arn:aws:ecr:*:${data.aws_caller_identity.current.account_id}:repository/${var.project_name}-*"
+        ]
+      },
+
+      # 11. ECRイメージ管理
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:PutImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:BatchDeleteImage"
+        ]
+        Resource = [
+          "arn:aws:ecr:*:${data.aws_caller_identity.current.account_id}:repository/${var.project_name}-*"
+        ]
+      },
+
+      # 12. CloudWatch Logs（ECSタスクログ用）
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogGroups",
+          "logs:DescribeLogStreams",
+          "logs:DeleteLogGroup"
+        ]
+        Resource = [
+          "arn:aws:logs:*:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${var.project_name}-*",
+          "arn:aws:logs:*:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${var.project_name}-*:*"
+        ]
+      },
+
       # RDS関連
       {
         Effect = "Allow"
@@ -743,6 +945,27 @@ resource "aws_iam_policy" "prod_restrictions" {
           "arn:aws:lambda:*:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-prod-*",
           "arn:aws:lambda:*:${data.aws_caller_identity.current.account_id}:layer:${var.project_name}-prod-*"
         ]
+      },
+
+      # ECS/ECRの破壊的操作を拒否
+      {
+        Effect = "Deny"
+        Action = [
+          # ECSクラスター削除
+          "ecs:DeleteCluster",
+          "ecs:DeleteService",
+          
+          # ECRリポジトリ削除
+          "ecr:DeleteRepository",
+          
+          # ECRイメージ削除
+          "ecr:BatchDeleteImage"
+        ]
+        Resource = [
+          "arn:aws:ecs:*:${data.aws_caller_identity.current.account_id}:cluster/${var.project_name}-prod-*",
+          "arn:aws:ecs:*:${data.aws_caller_identity.current.account_id}:service/${var.project_name}-prod-*/*",
+          "arn:aws:ecr:*:${data.aws_caller_identity.current.account_id}:repository/${var.project_name}-prod-*"
+        ]
       }
 
     ]
@@ -763,13 +986,16 @@ resource "aws_iam_role_policy_attachment" "prod_restrictions" {
   role       = aws_iam_role.github_actions["prod"].name
 }
 
+# ===================================
+# フロントエンドci/cdデプロイ用ポリシー
+# ===================================
 # S3アプリデプロイ用のポリシー
 # これはアプリケーションリポジトリからのCI/CDデプロイ用
 # github actionsからawsを操作する場合のポリシー
-resource "aws_iam_policy" "app_deploy" {
+resource "aws_iam_policy" "frontend_deploy" {
   for_each = toset(var.environments)
   
-  name        = "${var.project_name}-AppDeploy-${each.value}"
+  name        = "${var.project_name}-FrontendDeploy-${each.value}"
   description = "アプリケーションデプロイ用ポリシー for ${each.value} environment"
 
   policy = jsonencode({
@@ -787,8 +1013,8 @@ resource "aws_iam_policy" "app_deploy" {
           "s3:GetObjectAcl"
         ]
         Resource = [
-          "arn:aws:s3:::${var.project_name}-${each.value}-*",
-          "arn:aws:s3:::${var.project_name}-${each.value}-*/*"
+          "arn:aws:s3:::${var.project_name}-${each.value}-frontend*",
+          "arn:aws:s3:::${var.project_name}-${each.value}-frontend*/*"
         ]
       },
       # CloudFrontキャッシュクリア権限
@@ -814,17 +1040,146 @@ resource "aws_iam_policy" "app_deploy" {
   })
 
   tags = {
-    Name        = "${var.project_name}-AppDeploy-${each.value}"
+    Name        = "${var.project_name}-FrontendDeploy-${each.value}"
     Environment = each.value
     Project     = var.project_name
     ManagedBy   = "terraform"
   }
 }
 
-# アプリデプロイポリシーをロールにアタッチ
-resource "aws_iam_role_policy_attachment" "app_deploy" {
+# ===================================
+# バックエンドci/cdデプロイ用ポリシー
+# ===================================
+resource "aws_iam_policy" "backend_deploy" {
   for_each = toset(var.environments)
   
-  policy_arn = aws_iam_policy.app_deploy[each.value].arn
-  role       = aws_iam_role.github_actions[each.value].name
+  name        = "${var.project_name}-BackendDeploy-${each.value}"
+  description = "バックエンドデプロイ用ポリシー for ${each.value} environment"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      # ECR認証
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken"
+        ]
+        Resource = "*"
+      },
+      # ECRイメージプッシュ権限
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:CompleteLayerUpload",
+          "ecr:InitiateLayerUpload",
+          "ecr:PutImage",
+          "ecr:UploadLayerPart",
+          "ecr:DescribeImages",
+          "ecr:ListImages"
+        ]
+        Resource = [
+          "arn:aws:ecr:*:${data.aws_caller_identity.current.account_id}:repository/${var.project_name}-${each.value}-*"
+        ]
+      },
+      # ECSサービス更新通知用（オプション）
+      {
+        Effect = "Allow"
+        Action = [
+          "ecs:DescribeServices",
+          "ecs:DescribeTaskDefinition"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+
+  tags = {
+    Name        = "${var.project_name}-BackendDeploy-${each.value}"
+    Environment = each.value
+    Project     = var.project_name
+    ManagedBy   = "terraform"
+  }
+}
+
+# ===================================
+# フロントエンド用ロール
+# ===================================
+resource "aws_iam_role" "github_actions_frontend" {
+  for_each = toset(var.environments)
+  
+  name = "${var.project_name}-GitHubActions-Frontend-${each.value}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Effect = "Allow"
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.github.arn
+        }
+        Condition = {
+          StringEquals = {
+            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+          }
+          StringLike = {
+            "token.actions.githubusercontent.com:sub" = [
+              "repo:${var.github_repository_frontend}:ref:refs/heads/main",
+              "repo:${var.github_repository_frontend}:ref:refs/heads/develop"
+            ]
+          }
+        }
+      }
+    ]
+  })
+}
+
+# ===================================
+# バックエンド用ロール
+# ===================================
+resource "aws_iam_role" "github_actions_backend" {
+  for_each = toset(var.environments)
+  
+  name = "${var.project_name}-GitHubActions-Backend-${each.value}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Effect = "Allow"
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.github.arn
+        }
+        Condition = {
+          StringEquals = {
+            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+          }
+          StringLike = {
+            "token.actions.githubusercontent.com:sub" = [
+              "repo:${var.github_repository_backend}:ref:refs/heads/main",
+              "repo:${var.github_repository_backend}:ref:refs/heads/develop"
+            ]
+          }
+        }
+      }
+    ]
+  })
+}
+
+# アプリデプロイポリシーをロールにポリシーをアタッチ
+resource "aws_iam_role_policy_attachment" "frontend_deploy" {
+  for_each = toset(var.environments)
+  
+  policy_arn = aws_iam_policy.frontend_deploy[each.value].arn
+  role       = aws_iam_role.github_actions_frontend[each.value].name
+}
+
+resource "aws_iam_role_policy_attachment" "backend_deploy" {
+  for_each = toset(var.environments)
+  
+  policy_arn = aws_iam_policy.backend_deploy[each.value].arn
+  role       = aws_iam_role.github_actions_backend[each.value].name
 }
