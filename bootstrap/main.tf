@@ -1432,16 +1432,27 @@ resource "aws_iam_policy" "terraform_execution" {
         ]
         Resource = "*"
       },
-      # Systems Manager関連
+      
+      # ===================================
+      # Systems Manager Parameter Store関連
+      # ===================================
+
+      # プロジェクト固有のパラメータ（機密情報含む）
       {
         Effect = "Allow"
         Action = [
-          "ssm:GetParameter",
-          "ssm:GetParameters",
-          "ssm:GetParametersByPath"
+          "ssm:GetParameter",           # 単一パラメータ取得
+          "ssm:GetParameters",          # 複数パラメータ取得（バッチ）
+          "ssm:GetParametersByPath"     # パス配下の全パラメータ取得
         ]
-        Resource = "*"
+        Resource = [
+          # プロジェクト名で始まるパラメータのみアクセス可能
+          # 例: /my-project/dev/db-password
+          #     /my-project/prod/jwt-secret
+          "arn:aws:ssm:*:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/*"
+        ]
       },
+
       # Route53関連
       {
         Effect = "Allow"
