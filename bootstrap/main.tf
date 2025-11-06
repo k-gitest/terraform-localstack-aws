@@ -1735,14 +1735,70 @@ resource "aws_iam_policy" "terraform_execution" {
       #   ]
       # },
 
-      # Certificate Manager関連
+      # ===================================
+      # AWS Certificate Manager (ACM) 関連
+      # ===================================
+
+      # 1. 読み取り専用操作
       {
         Effect = "Allow"
         Action = [
-          "acm:*"
+          "acm:DescribeCertificate",
+          "acm:GetCertificate",
+          "acm:ListCertificates",
+          "acm:ListTagsForCertificate"
         ]
         Resource = "*"
       },
+
+      # 2. 証明書リクエスト（タグ必須）
+      {
+        Effect = "Allow"
+        Action = [
+          "acm:RequestCertificate"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestTag/Project": var.project_name
+            "aws:RequestTag/ManagedBy": "terraform"
+          }
+        }
+      },
+
+      # 3. 証明書管理（タグフィルタ）
+      {
+        Effect = "Allow"
+        Action = [
+          "acm:DeleteCertificate",  # prod_restrictionsでDenyされる
+          "acm:RenewCertificate",
+          "acm:ResendValidationEmail",
+          "acm:AddTagsToCertificate",
+          "acm:RemoveTagsFromCertificate"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:ResourceTag/Project": var.project_name
+          }
+        }
+      },
+
+      # 4. 証明書インポート（必要な場合のみ）
+      {
+        Effect = "Allow"
+        Action = [
+          "acm:ImportCertificate"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestTag/Project": var.project_name
+            "aws:RequestTag/ManagedBy": "terraform"
+          }
+        }
+      },
+
       # その他必要な権限
       {
         Effect = "Allow"
@@ -2023,7 +2079,26 @@ resource "aws_iam_policy" "prod_restrictions" {
             "aws:ResourceTag/Project": var.project_name
           }
         }
-      }
+      },
+
+      # ACM証明書の破壊的操作を拒否
+      {
+        Effect = "Deny"
+        Action = [
+          # 証明書削除
+          "acm:DeleteCertificate",
+          
+          # 秘密鍵エクスポート（超危険）
+          "acm:ExportCertificate"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:ResourceTag/Environment": "prod"
+            "aws:ResourceTag/Project": var.project_name
+          }
+        }
+      },
 
       # ===================================
       # セキュリティ強化（権限エスカレーション防止）
