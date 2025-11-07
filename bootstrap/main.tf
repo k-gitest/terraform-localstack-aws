@@ -1751,7 +1751,7 @@ resource "aws_iam_policy" "terraform_execution" {
         Resource = "*"
       },
 
-      # 2. 証明書リクエスト（タグ必須）
+      # 2. 証明書リクエスト
       {
         Effect = "Allow"
         Action = [
@@ -1766,7 +1766,7 @@ resource "aws_iam_policy" "terraform_execution" {
         }
       },
 
-      # 3. 証明書管理（タグフィルタ）
+      # 3. 証明書管理
       {
         Effect = "Allow"
         Action = [
@@ -1799,15 +1799,21 @@ resource "aws_iam_policy" "terraform_execution" {
         }
       },
 
-      # その他必要な権限
+      # ===================================
+      # STS (Security Token Service) 関連
+      # ===================================
+
+      # アカウント情報取得
+      # 用途: data "aws_caller_identity" でアカウントIDを取得
+      #       ARN作成時に ${data.aws_caller_identity.current.account_id} として使用
       {
         Effect = "Allow"
         Action = [
-          "sts:GetCallerIdentity",
-          "sts:AssumeRole"
+          "sts:GetCallerIdentity"
         ]
-        Resource = "*"
+        Resource = "*"  # STSの仕様上 "*" 必須
       }
+
     ]
   })
 
