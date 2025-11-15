@@ -1,9 +1,9 @@
 # ===================================
-# IAM関連
+# IAM関連ポリシー定義
 # ===================================
 
 locals {
-  policy_statements_s3 = [
+  policy_statements_iam = [
     # 1. 読み取り専用操作
     {
       Effect = "Allow"
