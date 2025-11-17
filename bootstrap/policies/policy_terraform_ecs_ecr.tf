@@ -3,7 +3,7 @@
 # ===================================
 
 locals {
-  policy_statements_lambda = [
+  policy_statements_ecs_ecr = [
     # 1. 読み取り専用操作
     {
       Effect = "Allow"
@@ -123,6 +123,91 @@ locals {
           ]
         }
       }
+    },
+
+    # ===================================
+    # ECR関連
+    # ===================================
+    # 8. ECR読み取り専用操作
+    {
+      Effect = "Allow"
+      Action = [
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:BatchGetImage",
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:DescribeRepositories",
+        "ecr:DescribeImages",
+        "ecr:ListImages",
+        "ecr:ListTagsForResource",
+        "ecr:GetRepositoryPolicy",
+        "ecr:GetLifecyclePolicy",
+        "ecr:GetLifecyclePolicyPreview"
+      ]
+      Resource = [
+        "arn:aws:ecr:*:${data.aws_caller_identity.current.account_id}:repository/${var.project_name}-*"
+      ]
+    },
+
+    # 9. ECR認証トークン取得
+    {
+      Effect = "Allow"
+      Action = [
+        "ecr:GetAuthorizationToken"
+      ]
+      Resource = "*"  # GetAuthorizationTokenはリソース指定不可
+    },
+
+    # 10. ECRリポジトリ管理
+    {
+      Effect = "Allow"
+      Action = [
+        "ecr:CreateRepository",
+        "ecr:DeleteRepository",
+        "ecr:PutRepositoryPolicy",
+        "ecr:DeleteRepositoryPolicy",
+        "ecr:SetRepositoryPolicy",
+        "ecr:PutLifecyclePolicy",
+        "ecr:DeleteLifecyclePolicy",
+        "ecr:PutImageTagMutability",
+        "ecr:PutImageScanningConfiguration",
+        "ecr:TagResource",
+        "ecr:UntagResource"
+      ]
+      Resource = [
+        "arn:aws:ecr:*:${data.aws_caller_identity.current.account_id}:repository/${var.project_name}-*"
+      ]
+    },
+
+    # 11. ECRイメージ管理
+    {
+      Effect = "Allow"
+      Action = [
+        "ecr:PutImage",
+        "ecr:InitiateLayerUpload",
+        "ecr:UploadLayerPart",
+        "ecr:CompleteLayerUpload",
+        "ecr:BatchDeleteImage"
+      ]
+      Resource = [
+        "arn:aws:ecr:*:${data.aws_caller_identity.current.account_id}:repository/${var.project_name}-*"
+      ]
+    },
+
+    # 12. CloudWatch Logs（ECSタスクログ用）
+    {
+      Effect = "Allow"
+      Action = [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+        "logs:DescribeLogGroups",
+        "logs:DescribeLogStreams",
+        "logs:DeleteLogGroup"
+      ]
+      Resource = [
+        "arn:aws:logs:*:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${var.project_name}-*",
+        "arn:aws:logs:*:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${var.project_name}-*:*"
+      ]
     }
   ]
 }
