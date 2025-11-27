@@ -40,7 +40,26 @@ Terragruntを用いることで、Terraformの構成をDRY（Don't Repeat Yourse
 ├── bootstrap/
 │   ├── main.tf   # OIDCプロバイダー・認証、IAMロール・ポリシー設定
 │   ├── variables.tf
-│   └── outputs.tf
+│   ├── outputs.tf
+│   └── policies
+│       ├── policy_terraform_execution.tf # Terraform実行用ポリシー（統合）
+│       ├── policy_prod_restrictions.tf # 本番環境用追加ポリシー
+│       ├── policy_frontend_deploy.tf # フロントエンドci/cdデプロイ用ポリシー
+│       ├── policy_backend_deploy.tf # バックエンドci/cdデプロイ用ポリシー
+│       ├── policy_terraform_ec2.tf
+│       ├── policy_terraform_s3.tf
+│       ├── policy_terraform_iam.tf
+│       ├── policy_terraform_lambda.tf
+│       ├── policy_terraform_ecs_ecr.tf
+│       ├── policy_terraform_rds.tf
+│       ├── policy_terraform_alb.tf
+│       ├── policy_terraform_cloudfront.tf
+│       ├── policy_terraform_amplify.tf
+│       ├── policy_terraform_cloudwatch.tf
+│       ├── policy_terraform_ssm.tf
+│       ├── policy_terraform_route53.tf
+│       ├── policy_terraform_acm.tf
+│       └── policy_terraform_sts.tf
 ├── terraform/
 │   ├── environments/ # 環境ごとのプロバイダー
 │   │   ├── local/      
