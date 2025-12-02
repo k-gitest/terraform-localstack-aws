@@ -1,11 +1,11 @@
 # ===================================
-# 本番環境には追加の制限を設ける場合のポリシー
+# 本番環境への追加制限ポリシー（最終版）
 # ===================================
 resource "aws_iam_policy" "prod_restrictions" {
   count = contains(var.environments, "prod") ? 1 : 0
   
   name        = "${var.project_name}-ProdRestrictions"
-  description = "本番環境での追加制限ポリシー"
+  description = "本番環境での破壊的操作を明示的に拒否するポリシー"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -14,24 +14,36 @@ resource "aws_iam_policy" "prod_restrictions" {
       # リソース保護（破壊的操作の拒否）
       # ===================================
 
-      # EC2/RDSの破壊的操作を特定リージョン外で拒否
+      # EC2/VPCの破壊的操作を拒否
       {
+        Sid    = "DenyEC2VPCDeletion"
         Effect = "Deny"
         Action = [
           "ec2:TerminateInstances",
-          "rds:DeleteDBInstance",
-          "rds:DeleteDBCluster"
+          "ec2:DeleteVpc",
+          "ec2:DeleteSubnet",
+          "ec2:DeleteRouteTable",
+          "ec2:DeleteRoute",
+          "ec2:DeleteInternetGateway",
+          "ec2:DeleteNatGateway",
+          "ec2:ReleaseAddress",
+          "ec2:DeleteSecurityGroup",
+          "ec2:DeleteNetworkAcl",
+          "ec2:DeleteNetworkAclEntry",
+          "ec2:DeleteVpcEndpoints"
         ]
         Resource = "*"
         Condition = {
-          StringNotEquals = {
-            "aws:RequestedRegion": ["ap-northeast-1"]
+          StringEquals = {
+            "aws:ResourceTag/Environment" = "prod"
+            "aws:ResourceTag/Project"     = var.project_name
           }
         }
       },
 
       # S3の破壊的操作を完全に拒否
       {
+        Sid    = "DenyS3Deletion"
         Effect = "Deny"
         Action = [
           "s3:DeleteBucket",
@@ -45,8 +57,27 @@ resource "aws_iam_policy" "prod_restrictions" {
         ]
       },
       
-      # 管理者権限ポリシーのアタッチを拒否
+      # IAMの破壊的操作を拒否
       {
+        Sid    = "DenyIAMDeletion"
+        Effect = "Deny"
+        Action = [
+          "iam:DeleteRole",
+          "iam:DeletePolicy",
+          "iam:DeleteRolePolicy",
+          "iam:DeleteInstanceProfile",
+          "iam:DetachRolePolicy"
+        ]
+        Resource = [
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-prod-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${var.project_name}-prod-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:instance-profile/${var.project_name}-prod-*"
+        ]
+      },
+      
+      # 管理者権限ポリシーのアタッチを拒否（権限エスカレーション防止）
+      {
+        Sid    = "DenyAdminPolicyAttachment"
         Effect = "Deny"
         Action = [
           "iam:AttachRolePolicy"
@@ -65,6 +96,7 @@ resource "aws_iam_policy" "prod_restrictions" {
       
       # Lambda関数の削除を拒否
       {
+        Sid    = "DenyLambdaDeletion"
         Effect = "Deny"
         Action = [
           "lambda:DeleteFunction",
@@ -80,16 +112,12 @@ resource "aws_iam_policy" "prod_restrictions" {
 
       # ECS/ECRの破壊的操作を拒否
       {
+        Sid    = "DenyECSECRDeletion"
         Effect = "Deny"
         Action = [
-          # ECSクラスター削除
           "ecs:DeleteCluster",
           "ecs:DeleteService",
-          
-          # ECRリポジトリ削除
           "ecr:DeleteRepository",
-          
-          # ECRイメージ削除
           "ecr:BatchDeleteImage"
         ]
         Resource = [
@@ -101,19 +129,13 @@ resource "aws_iam_policy" "prod_restrictions" {
 
       # RDSの破壊的操作を拒否
       {
+        Sid    = "DenyRDSDeletion"
         Effect = "Deny"
         Action = [
-          # インスタンス削除
           "rds:DeleteDBInstance",
           "rds:DeleteDBCluster",
-          
-          # スナップショット削除
           "rds:DeleteDBSnapshot",
-          "rds:DeleteDBClusterSnapshot",
-          
-          # 暗号化の無効化（既存のEC2/RDSのConditionと統合）
-          "rds:ModifyDBInstance",
-          "rds:ModifyDBCluster"
+          "rds:DeleteDBClusterSnapshot"
         ]
         Resource = [
           "arn:aws:rds:*:${data.aws_caller_identity.current.account_id}:db:${var.project_name}-prod-*",
@@ -121,10 +143,22 @@ resource "aws_iam_policy" "prod_restrictions" {
           "arn:aws:rds:*:${data.aws_caller_identity.current.account_id}:snapshot:${var.project_name}-prod-*",
           "arn:aws:rds:*:${data.aws_caller_identity.current.account_id}:cluster-snapshot:${var.project_name}-prod-*"
         ]
-        # ModifyのみConditionを追加（削除操作には不要）
+      },
+
+      # RDS暗号化の無効化を拒否
+      {
+        Sid    = "DenyRDSEncryptionDisable"
+        Effect = "Deny"
+        Action = [
+          "rds:ModifyDBInstance",
+          "rds:ModifyDBCluster"
+        ]
+        Resource = [
+          "arn:aws:rds:*:${data.aws_caller_identity.current.account_id}:db:${var.project_name}-prod-*",
+          "arn:aws:rds:*:${data.aws_caller_identity.current.account_id}:cluster:${var.project_name}-prod-*"
+        ]
         Condition = {
           StringEquals = {
-            # 暗号化を無効化する変更を拒否
             "rds:StorageEncrypted": "false"
           }
         }
@@ -132,47 +166,30 @@ resource "aws_iam_policy" "prod_restrictions" {
 
       # ALB/ELBの破壊的操作を拒否
       {
+        Sid    = "DenyALBDeletion"
         Effect = "Deny"
         Action = [
-          # ロードバランサー削除
           "elasticloadbalancing:DeleteLoadBalancer",
-          
-          # ターゲットグループ削除
-          "elasticloadbalancing:DeleteTargetGroup",
-          
-          # リスナー削除
-          "elasticloadbalancing:DeleteListener",
-          
-          # ルール削除
-          "elasticloadbalancing:DeleteRule"
+          "elasticloadbalancing:DeleteTargetGroup"
+          # リスナー/ルール削除は設定変更のため許可（Allow側でコメント済み）
         ]
         Resource = [
           "arn:aws:elasticloadbalancing:*:${data.aws_caller_identity.current.account_id}:loadbalancer/app/${var.project_name}-prod-*",
           "arn:aws:elasticloadbalancing:*:${data.aws_caller_identity.current.account_id}:loadbalancer/net/${var.project_name}-prod-*",
-          "arn:aws:elasticloadbalancing:*:${data.aws_caller_identity.current.account_id}:targetgroup/${var.project_name}-prod-*",
-          "arn:aws:elasticloadbalancing:*:${data.aws_caller_identity.current.account_id}:listener/app/${var.project_name}-prod-*",
-          "arn:aws:elasticloadbalancing:*:${data.aws_caller_identity.current.account_id}:listener/net/${var.project_name}-prod-*",
-          "arn:aws:elasticloadbalancing:*:${data.aws_caller_identity.current.account_id}:listener-rule/app/${var.project_name}-prod-*",
-          "arn:aws:elasticloadbalancing:*:${data.aws_caller_identity.current.account_id}:listener-rule/net/${var.project_name}-prod-*"
+          "arn:aws:elasticloadbalancing:*:${data.aws_caller_identity.current.account_id}:targetgroup/${var.project_name}-prod-*"
         ]
       },
 
       # CloudFrontの破壊的操作を拒否
       {
+        Sid    = "DenyCloudFrontDeletion"
         Effect = "Deny"
         Action = [
-          # ディストリビューション削除
           "cloudfront:DeleteDistribution",
-          
-          # ポリシー削除
           "cloudfront:DeleteCachePolicy",
           "cloudfront:DeleteOriginRequestPolicy",
           "cloudfront:DeleteResponseHeadersPolicy",
-          
-          # OAC削除
           "cloudfront:DeleteOriginAccessControl",
-          
-          # Functions削除
           "cloudfront:DeleteFunction"
         ]
         Resource = [
@@ -187,6 +204,7 @@ resource "aws_iam_policy" "prod_restrictions" {
 
       # Amplifyの破壊的操作を拒否
       {
+        Sid    = "DenyAmplifyDeletion"
         Effect = "Deny"
         Action = [
           "amplify:DeleteApp",
@@ -197,102 +215,79 @@ resource "aws_iam_policy" "prod_restrictions" {
         Resource = "*"
         Condition = {
           StringEquals = {
-            "aws:ResourceTag/Environment": "prod"
-            "aws:ResourceTag/Project": var.project_name
+            "aws:ResourceTag/Environment" = "prod"
+            "aws:ResourceTag/Project"     = var.project_name
           }
         }
       },
 
       # CloudWatch Logsの破壊的操作を拒否
       {
+        Sid    = "DenyCloudWatchLogsDeletion"
         Effect = "Deny"
         Action = [
-          # ロググループ削除
           "logs:DeleteLogGroup",
-          
-          # ログストリーム削除
-          "logs:DeleteLogStream",
-          
-          # 保持期間の短縮（証跡削除の可能性）
           "logs:DeleteRetentionPolicy"
+          # ログストリーム削除はローテーションのため許可
         ]
         Resource = [
-          # Lambda用
           "arn:aws:logs:*:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${var.project_name}-prod-*",
           "arn:aws:logs:*:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${var.project_name}-prod-*:*",
-          
-          # ECS用
           "arn:aws:logs:*:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${var.project_name}-prod-*",
           "arn:aws:logs:*:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${var.project_name}-prod-*:*",
-          
-          # カスタムログ用
           "arn:aws:logs:*:${data.aws_caller_identity.current.account_id}:log-group:/${var.project_name}/prod/*",
           "arn:aws:logs:*:${data.aws_caller_identity.current.account_id}:log-group:/${var.project_name}/prod/*:*"
         ]
       },
 
-      # Route53の破壊的操作を拒否
+      # SSMパラメータの破壊的操作を拒否
       {
+        Sid    = "DenySSMDeletion"
         Effect = "Deny"
         Action = [
-          # ホストゾーン削除
+          "ssm:DeleteParameter",
+          "ssm:DeleteParameters"
+        ]
+        Resource = [
+          "arn:aws:ssm:*:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/prod/*"
+        ]
+      },
+
+      # Route53の破壊的操作を拒否
+      {
+        Sid    = "DenyRoute53Deletion"
+        Effect = "Deny"
+        Action = [
           "route53:DeleteHostedZone",
-          
-          # ヘルスチェック削除
           "route53:DeleteHealthCheck",
-          
-          # トラフィックポリシー削除
           "route53:DeleteTrafficPolicy",
           "route53:DeleteTrafficPolicyInstance"
         ]
         Resource = "*"
         Condition = {
           StringEquals = {
-            "aws:ResourceTag/Environment": "prod"
-            "aws:ResourceTag/Project": var.project_name
+            "aws:ResourceTag/Environment" = "prod"
+            "aws:ResourceTag/Project"     = var.project_name
           }
         }
       },
 
       # ACM証明書の破壊的操作を拒否
       {
+        Sid    = "DenyACMDeletion"
         Effect = "Deny"
         Action = [
-          # 証明書削除
           "acm:DeleteCertificate",
-          
-          # 秘密鍵エクスポート（超危険）
-          "acm:ExportCertificate"
+          "acm:ExportCertificate"  # 秘密鍵エクスポートも防止
         ]
         Resource = "*"
         Condition = {
           StringEquals = {
-            "aws:ResourceTag/Environment": "prod"
-            "aws:ResourceTag/Project": var.project_name
+            "aws:ResourceTag/Environment" = "prod"
+            "aws:ResourceTag/Project"     = var.project_name
           }
         }
-      },
-
-      # ===================================
-      # セキュリティ強化（権限エスカレーション防止）
-      # ===================================
-
-      # IAMの破壊的操作を拒否
-      # 攻撃者がAdministratorAccess等をアタッチして全権限を取得するのを防ぐ
-      {
-        Effect = "Deny"
-        Action = [
-          "iam:DeleteRole",
-          "iam:DeletePolicy",
-          "iam:DeleteRolePolicy",
-          "iam:DetachRolePolicy"
-        ]
-        Resource = [
-          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-prod-*",
-          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${var.project_name}-prod-*"
-        ]
       }
-
     ]
   })
 
@@ -301,5 +296,6 @@ resource "aws_iam_policy" "prod_restrictions" {
     Environment = "prod"
     Project     = var.project_name
     ManagedBy   = "terraform"
+    Purpose     = "Deny destructive operations in production environment"
   }
 }
