@@ -41,6 +41,7 @@ Terragruntを用いることで、Terraformの構成をDRY（Don't Repeat Yourse
 │   ├── main.tf   # OIDCプロバイダー・認証、IAMロール・ポリシー設定
 │   ├── variables.tf
 │   ├── outputs.tf
+│   ├── README.md # セキュリティ・ポリシー設定に関するドキュメント
 │   └── policies
 │       ├── policy_terraform_execution.tf # Terraform実行用ポリシー（統合）
 │       ├── policy_prod_restrictions.tf # 本番環境用追加ポリシー
@@ -423,6 +424,14 @@ graph TB
     class RDS,Aurora database
     class DevOnly,DevSSH dev
 ```
+
+## 初期設定 (Bootstrap)
+
+本プロジェクトのインフラストラクチャ管理基盤（OIDCプロバイダー、IAMロール、S3バックエンドなど）は、`bootstrap`ディレクトリ内のTerraformによって管理されています。
+
+**詳細な手順、IAMセキュリティ設計、およびOIDCロールの設定については、以下のドキュメントを参照してください。**
+
+➡️ [**初期設定とセキュリティ設計の詳細（`bootstrap/README.md`）**](bootstrap/README.md)
 
 ## モジュール詳細
 
