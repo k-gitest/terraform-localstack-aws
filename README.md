@@ -1,10 +1,9 @@
 ## 目次
 
-- [プロジェクト概要](#terraformを用いたaws環境のiacプロビジョニングaws-iac-module-architecture)
 - [概要](#概要)
 - [使用技術](#使用技術)
 - [準備](#準備)
-- [ディレクトリ構成](#構成)
+- [ディレクトリ構成](#ディレクトリ構成)
 - [セグメント分離構成](#セグメント分離構成)
 - [Terragrunt構成](#terragrunt構成)
 - [設計パターン](#設計パターン)
@@ -13,14 +12,15 @@
 - [システム概要図](#システム概要図)
 - [ネットワーク構成図](#ネットワーク構成図)
 - [セキュリティグループ構成図](#セキュリティグループ構成図)
-- [初期設定（Bootstrap）](#初期設定-bootstrap)
+- [初期設定 / Bootstrap](#初期設定--bootstrap)
 - [モジュール詳細](#モジュール詳細)
 - [OIDC認証用のプロバイダー設定](#oidc認証用のプロバイダー設定)
 - [環境ごとのプロバイダー設定とリソース作成の制御](#環境ごとのプロバイダー設定とリソース作成の制御)
 - [Terraform Remote State 設定ガイド](#terraform-remote-state-設定ガイド)
 - [Terragruntによる設計](#terragruntによる設計)
-- [Makefileでのコマンド管理](#makefileでコマンド設定)
+- [Makefileでのコマンド管理](#makefileでのコマンド管理)
 - [CI/CDでplan/applyの自動化](#cicdでplanapplyの自動化)
+
 
 # Terraformを用いたAWS環境のIaCプロビジョニング(aws-iac-module-architecture)
 Terraformを使用してawsをコードで管理し自動作成
@@ -55,7 +55,7 @@ Terragruntを用いることで、Terraformの構成をDRY（Don't Repeat Yourse
 - ECR用のDockerイメージ
 - sslが必要な場合はssl証明書
 
-## 構成
+## ディレクトリ構成
 ```text
 /
 ├── .devcontainer/
@@ -449,7 +449,7 @@ graph TB
     class DevOnly,DevSSH dev
 ```
 
-## 初期設定 (Bootstrap)
+## 初期設定 / Bootstrap
 
 本プロジェクトのインフラストラクチャ管理基盤（OIDCプロバイダー、IAMロール、S3バックエンドなど）は、`bootstrap`ディレクトリ内のTerraformによって管理されています。
 
@@ -935,7 +935,7 @@ terragruntではfor_eachが使用できないので、複数リソースを作�
 run-all init コマンドは基本的に並列処理なので複数リモートバックエンドに設定している場合、危険な可能性があります。
 --terragrunt-parallelism=1 オプションで実行数を指定してあげると良いでしょう。
 
-## Makefileでコマンド設定
+## Makefileでのコマンド管理
 Makefileでコマンドを設定する事で効率的にterraformやterragruntの実行ができるようになります。
 
 **注意点**
